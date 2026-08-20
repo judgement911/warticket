@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import json
 import os
 import random
@@ -583,14 +584,58 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
     """Let Ade drive the bot from Telegram itself — no laptop needed."""
     if DRY_RUN or not BOT_TOKEN:
         return
+    conflict = False
+    backoff = 0.0
     while True:
         try:
+            if backoff:
+                await asyncio.sleep(backoff)
             r = await client.get(
                 f"{TG}/getUpdates",
                 params={"offset": state.get("tg_offset", 0), "timeout": 25},
                 timeout=35,
             )
-            for upd in r.json().get("result", []):
+            data = r.json()
+            # An error body has no "result", which is indistinguishable from
+            # "no new messages" if you only ever read .get("result", []).
+            # That is how this loop used to spin a few hundred times a second
+            # against a 409 without logging a thing.
+            if not data.get("ok", False):
+                code = data.get("error_code")
+                desc = str(data.get("description", ""))[:160]
+                if code == 409:
+                    backoff = 30.0
+                    log("command poll: CONFLICT — another instance is polling "
+                        f"getUpdates, commands are being eaten. {desc}")
+                    if not conflict:
+                        conflict = True
+                        # sendMessage still works: only getUpdates conflicts,
+                        # so this warning does reach the phone.
+                        await send(client,
+                                   "⚠️ <b>two bots are running</b>\n\n"
+                                   "Another instance is polling Telegram, so "
+                                   "your commands are being swallowed. Stop "
+                                   "the duplicate.\n\n"
+                                   "<i>Alerts still work — only commands are "
+                                   "affected.</i>", silent=True)
+                elif code == 429:
+                    retry = float((data.get("parameters") or {})
+                                  .get("retry_after", 5))
+                    backoff = min(max(retry, 1.0), 120.0)
+                    log(f"command poll: rate limited, waiting {backoff:g}s")
+                else:
+                    backoff = min(max(backoff * 2, 5.0), 120.0)
+                    log(f"command poll: telegram said {code}: {desc}")
+                continue
+
+            backoff = 0.0
+            if conflict:
+                conflict = False
+                log("command poll: conflict cleared, commands live again")
+                await send(client, "✅ commands live again — duplicate is gone",
+                           silent=True)
+            state["cmd_ok_at"] = now()
+            for upd in data.get("result", []):
                 state["tg_offset"] = upd["update_id"] + 1
                 m = upd.get("message") or {}
                 text = m.get("text", "").strip()
@@ -731,8 +776,18 @@ async def heartbeat(client: httpx.AsyncClient, config: dict, state: dict) -> Non
     while True:
         await asyncio.sleep(every)
         save_state(state)
-        await send(client, f"🤖 still watching {len(config['targets'])} targets · {wib()} WIB",
-                   silent=True)
+        note = ""
+        # The heartbeat keeps arriving when the command loop is dead, so this
+        # is the one place that can tell you commands stopped answering.
+        seen = state.get("cmd_ok_at")
+        if BOT_TOKEN and not DRY_RUN:
+            if not seen:
+                note = "\n⚠️ commands never connected"
+            elif now() - seen > 300:
+                note = (f"\n⚠️ commands last answered "
+                        f"{int((now() - seen) / 60)} min ago")
+        await send(client, f"🤖 still watching {len(config['targets'])} targets "
+                           f"· {wib()} WIB{note}", silent=True)
 
 
 async def persist(state: dict) -> None:
@@ -801,6 +856,35 @@ async def countdown(client: httpx.AsyncClient, config: dict, state: dict) -> Non
                                   target.get("open_url", target["url"]))
 
 
+async def supervise(client: httpx.AsyncClient, name: str, factory) -> None:
+    """
+    Keep one loop alive on its own.
+
+    gather() used to hand the first exception straight up through main(), so a
+    crash in any single loop killed the whole bot — and since nothing
+    announced it, the bot simply went quiet. Now a loop that dies is reported
+    and restarted, and the rest keep running.
+    """
+    delay = 5.0
+    while True:
+        try:
+            await factory()
+            log(f"{name}: returned on its own — restarting in {delay:g}s")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log(f"{name}: CRASHED {e!r} — restarting in {delay:g}s")
+            try:
+                await send(client,
+                           f"⚠️ <b>{name} crashed</b>\n\n"
+                           f"<code>{html.escape(repr(e))[:300]}</code>\n\n"
+                           f"restarting in {delay:g}s", silent=True)
+            except Exception:
+                pass                      # never let the report kill the retry
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 300.0)
+
+
 async def main() -> None:
     config = load_json(CONFIG_PATH, None)
     if not config or not config.get("targets"):
@@ -819,13 +903,19 @@ async def main() -> None:
         await send(client, f"🤖 war tiket bot online · {len(targets)} targets · {wib()} WIB",
                    silent=True)
 
-        jobs = [watch(client, t, state) for t in targets]
-        jobs.append(heartbeat(client, config, state))
-        jobs.append(persist(state))
-        jobs.append(poll_commands(client, config, state))
-        jobs.append(nag(client, state))
-        jobs.append(countdown(client, config, state))
-        await asyncio.gather(*jobs)
+        jobs = [supervise(client, f"watch:{t['name']}",
+                          lambda t=t: watch(client, t, state))
+                for t in targets]
+        jobs += [
+            supervise(client, "heartbeat", lambda: heartbeat(client, config, state)),
+            supervise(client, "persist", lambda: persist(state)),
+            supervise(client, "commands", lambda: poll_commands(client, config, state)),
+            supervise(client, "nag", lambda: nag(client, state)),
+            supervise(client, "countdown", lambda: countdown(client, config, state)),
+        ]
+        # return_exceptions so one loop that somehow escapes its supervisor
+        # cannot take the others down with it
+        await asyncio.gather(*jobs, return_exceptions=True)
 
 
 if __name__ == "__main__":

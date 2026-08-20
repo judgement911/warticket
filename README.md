@@ -200,3 +200,32 @@ buyer form with card inputs sitting next to the real ones, payment page — and
 asserts the driver walks it, fills four fields, skips both card inputs, and
 stops without paying. Nothing leaves the machine.
 
+## When the bot goes quiet
+
+Telegram allows exactly one `getUpdates` consumer per token. Start a second
+instance and Telegram answers **409 Conflict** — and an error body carries no
+`result`, which is indistinguishable from "no new messages" if you only read
+`.get("result", [])`. The command loop used to spin on that at a few hundred
+requests a second, logging nothing and telling nobody: alerts kept working,
+`/status` answered sometimes or never, depending on which instance won the
+race. Two `bot online` messages a few minutes apart is the tell.
+
+It now backs off, logs the conflict, and messages you once — `sendMessage`
+still works during a conflict, so that warning does arrive. It tells you again
+when the duplicate goes away.
+
+Each loop also runs under a supervisor. `asyncio.gather` used to pass the first
+exception straight up through `main()`, so a crash in any one loop killed the
+whole bot, silently — the same quiet death from the outside. A loop that dies
+is now reported to Telegram and restarted with backoff while the others keep
+running.
+
+The heartbeat carries the answer to "are commands alive?", because it keeps
+arriving when the command loop is dead: it appends a warning when commands
+last answered more than five minutes ago. `heartbeat_hours` is 12 by default,
+which is a long time to wait for that news — lower it as drop day approaches.
+
+If the bot is silent, in order: check whether a second instance is running,
+check the process is alive at all, then check `heartbeat_hours` against how
+long it has actually been quiet.
+
