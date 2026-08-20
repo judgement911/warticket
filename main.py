@@ -33,7 +33,8 @@ import httpx
 
 WIB = timezone(timedelta(hours=7))
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+# comma-separated: DM, group, channel — alerts go to all of them
+CHAT_IDS = [c.strip() for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if c.strip()]
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -81,30 +82,36 @@ def save_state(state: dict) -> None:
 
 # ---------------------------------------------------------------- telegram
 
-async def send(client: httpx.AsyncClient, text: str, silent: bool = False) -> None:
-    """Fire a Telegram message. Retries twice — this is the whole point of the bot."""
+async def send(client: httpx.AsyncClient, text: str, silent: bool = False, to=None) -> None:
+    """
+    Fire a Telegram message.
+    to=None  -> broadcast to every chat in TELEGRAM_CHAT_ID (alerts)
+    to=<id>  -> reply only to that chat (command responses)
+    """
     if DRY_RUN or not BOT_TOKEN:
-        print(f"\n=== ALERT ===\n{text}\n=============\n", flush=True)
+        print(f"\n=== ALERT (to={to or CHAT_IDS}) ===\n{text}\n=============\n", flush=True)
         return
-    for attempt in range(3):
-        try:
-            r = await client.post(
-                f"{TG}/sendMessage",
-                json={
-                    "chat_id": CHAT_ID,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                    "disable_notification": silent,
-                },
-                timeout=10,
-            )
-            if r.status_code == 200:
-                return
-            log(f"telegram {r.status_code}: {r.text[:120]}")
-        except Exception as e:
-            log(f"telegram error: {e}")
-        await asyncio.sleep(1 + attempt)
+    targets = [to] if to is not None else CHAT_IDS
+    for chat in targets:
+        for attempt in range(3):
+            try:
+                r = await client.post(
+                    f"{TG}/sendMessage",
+                    json={
+                        "chat_id": chat,
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                        "disable_notification": silent,
+                    },
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    break
+                log(f"telegram {r.status_code} for chat {chat}: {r.text[:120]}")
+            except Exception as e:
+                log(f"telegram error for chat {chat}: {e}")
+            await asyncio.sleep(1 + attempt)
 
 
 # ---------------------------------------------------------------- rule engine
@@ -307,12 +314,23 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
             )
             for upd in r.json().get("result", []):
                 state["tg_offset"] = upd["update_id"] + 1
-                text = (upd.get("message") or {}).get("text", "").strip().lower()
-                if not text.startswith("/"):
+                m = upd.get("message") or {}
+                text = m.get("text", "").strip()
+                origin = (m.get("chat") or {}).get("id")
+                if not text.startswith("/") or origin is None:
                     continue
                 cmd, *args = text.split()
+                cmd = cmd.split("@")[0].lower()   # /status@MyBot -> /status
 
-                if cmd == "/status":
+                if cmd == "/here":
+                    kind = (m.get("chat") or {}).get("type", "?")
+                    await send(client,
+                               f"chat id: <code>{origin}</code>\ntype: {kind}\n\n"
+                               f"add this to TELEGRAM_CHAT_ID in Railway "
+                               f"(comma-separated) to get alerts here.",
+                               silent=True, to=origin)
+
+                elif cmd == "/status":
                     lines = [f"🤖 alive · {wib()} WIB",
                              f"muted: {bool(state.get('muted'))}",
                              f"hot: {'yes' if state.get('hot_until',0) > now() else 'no'}", ""]
@@ -329,35 +347,36 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
                         lines.append(f"\n💤 sleeping ({len(off)})")
                         for t in off:
                             lines.append(f"   · {t['name']}")
-                    await send(client, "\n".join(lines), silent=True)
+                    await send(client, "\n".join(lines), silent=True, to=origin)
 
                 elif cmd == "/hot":
                     mins = float(args[0]) if args and args[0].replace(".", "").isdigit() else 15
                     state["hot_until"] = now() + mins * 60
-                    await send(client, f"🔥 hot mode ON for {mins:g} min", silent=True)
+                    await send(client, f"🔥 hot mode ON for {mins:g} min", silent=True, to=origin)
 
                 elif cmd == "/cool":
                     state["hot_until"] = 0
-                    await send(client, "❄️ back to normal cadence", silent=True)
+                    await send(client, "❄️ back to normal cadence", silent=True, to=origin)
 
                 elif cmd == "/mute":
                     state["muted"] = True
-                    await send(client, "🔇 muted", silent=True)
+                    await send(client, "🔇 muted", silent=True, to=origin)
 
                 elif cmd == "/unmute":
                     state["muted"] = False
-                    await send(client, "🔔 unmuted", silent=True)
+                    await send(client, "🔔 unmuted", silent=True, to=origin)
 
                 elif cmd == "/reset":
                     state["targets"] = {}
-                    await send(client, "♻️ baselines cleared", silent=True)
+                    await send(client, "♻️ baselines cleared", silent=True, to=origin)
 
                 elif cmd == "/test":
                     await send(client, "🚨🚨 <b>TEST ALERT</b> 🚨🚨\n\nif this is loud, you're ready.")
 
                 else:
-                    await send(client, "/status /hot [min] /cool /mute /unmute /reset /test",
-                               silent=True)
+                    await send(client,
+                               "/status /here /hot [min] /cool /mute /unmute /reset /test",
+                               silent=True, to=origin)
             save_state(state)
         except Exception as e:
             log(f"command poll: {e}")
