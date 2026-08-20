@@ -7,16 +7,27 @@
       "_note": "PRIMARY. Right now the Artist Presale / BCA Presale / General On-Sale buttons are dead links (href=#). When a window opens they become real tiket.com queue links — that is the change this catches. Server-rendered, so the bot sees the real HTML.",
       "enabled": true,
       "url": "https://maroon5jakarta2027.com/",
-      "rule": {
-        "type": "changed",
-        "ignore_pattern": "(csrf[^\"]*\"[^\"]*\"|_token[^\"]*\"[^\"]*\"|nonce=[^\"&]*|\\?v=\\d+|\\d{2}:\\d{2}:\\d{2})"
-      },
+      "rules": [
+        {
+          "_note": "THE one that matters: a dead href=# button becoming a real tiket.com/queue URL. Alerts with the actual link, bypasses cooldown, and nags until you /ack. First poll only takes a baseline so existing footer links don't false-fire.",
+          "type": "new_link",
+          "pattern": "(tiket\\.com|loket\\.com|queue-it\\.net|/checkout|/queue|/order|/booking)",
+          "fire_on_first": false
+        },
+        {
+          "_note": "Safety net: catches a redesign or a copy change that the link detector would miss.",
+          "type": "changed",
+          "ignore_pattern": "(csrf[^\"]*\"[^\"]*\"|_token[^\"]*\"[^\"]*\"|nonce=[^\"&]*|\\?v=\\d+|\\d{2}:\\d{2}:\\d{2})"
+        }
+      ],
       "interval": 20,
       "hot_interval": 1.5,
       "drop_time": "2026-08-29T10:00:00",
       "hot_window_min": 60,
       "cooldown": 300,
-      "open_url": "https://maroon5jakarta2027.com/"
+      "open_url": "https://maroon5jakarta2027.com/",
+      "alert_repeat": 12,
+      "alert_repeat_every": 25
     },
     {
       "name": "MAROON 5 — tiket.com backup",

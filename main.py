@@ -3,13 +3,18 @@
 WAR TIKET BOT  —  multi-site drop monitor with Telegram alerts.
 © built for Ade
 
-It WATCHES and TELLS YOU. It does not buy. You buy.
+It WATCHES, SHOUTS, and PUTS THE QUEUE LINK IN YOUR HAND. It does not buy.
+You buy — deliberately, no automated purchasing, no CAPTCHA/queue bypass.
 
 Env vars required:
     TELEGRAM_TOKEN    from @BotFather
     TELEGRAM_CHAT_ID  from @userinfobot
 Optional:
     DRY_RUN=1         print alerts instead of sending (for testing)
+    LOCAL_NOTIFY=1    desktop notification on the box running the bot
+    AUTO_OPEN=1       open the queue page in a local browser the instant it goes
+                      live (you still click Buy) — only useful if the bot runs
+                      on the machine you are buying from
 
 Run:  python main.py
 """
@@ -22,10 +27,14 @@ import json
 import os
 import random
 import re
+import shutil
+import subprocess
 import sys
 import time
+import webbrowser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
 
@@ -36,6 +45,8 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 # comma-separated: DM, group, channel — alerts go to all of them
 CHAT_IDS = [c.strip() for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if c.strip()]
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
+LOCAL_NOTIFY = os.environ.get("LOCAL_NOTIFY", "") == "1"
+AUTO_OPEN = os.environ.get("AUTO_OPEN", "") == "1"
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 HERE = Path(__file__).parent
@@ -52,6 +63,28 @@ BASE_HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
+
+# What a real "sale is live" destination looks like. The sale site ships these
+# buttons as href="#" until a window opens, then swaps in the true queue URL.
+LIVE_LINK_DEFAULT = (r"(tiket\.com|loket\.com|queue-it\.net|ticketmaster|"
+                     r"/checkout|/queue|/order|/booking)")
+
+# hrefs that mean "button not wired up yet"
+DEAD_HREFS = {"", "#", "/", "javascript:void(0)", "javascript:void(0);", "javascript:;"}
+
+# Per-request junk that changes on every single poll. Stripped before hashing,
+# because a "page changed" alert that is really just a rotated CSRF token trains
+# you to ignore the alert that matters. Applies to `changed` rules only — link
+# detection never strips anything.
+VOLATILE_DEFAULT = "|".join([
+    r"<meta[^>]*(?:csrf|nonce|token|build)[^>]*>",       # whole framework meta tag
+    r"nonce=[\"'][^\"']*[\"']",
+    r"(?:csrf|_token|authenticity_token|buildId)[\"']?\s*[:=]\s*[\"'][^\"']*[\"']",
+    r"[?&](?:v|t|ts|_|cb|cache)=[0-9a-fA-F]{4,}",        # cache busters
+    r"\b\d{13}\b",                                      # ms epoch
+    r"\b\d{2}:\d{2}:\d{2}\b",                           # clocks
+    r"\d{4}-\d{2}-\d{2}T[\d:.+Z-]+",                     # ISO timestamps
+])
 
 
 def now() -> float:
@@ -78,6 +111,85 @@ def save_state(state: dict) -> None:
         STATE_PATH.write_text(json.dumps(state, indent=2))
     except Exception as e:
         log(f"state save failed: {e}")
+
+
+# ---------------------------------------------------------------- links
+
+def extract_links(body: str, pattern: str, base: str = "") -> list[str]:
+    """
+    Pull every plausible checkout/queue destination out of a page.
+
+    Two passes, because sale sites hide the real URL in both places: normal
+    <a href> attributes, and bare URLs sitting in inline JS config blobs.
+    """
+    candidates = [m.group(1).strip() for m in
+                  re.finditer(r'href\s*=\s*["\']([^"\']+)["\']', body, re.I)]
+    candidates += re.findall(r'https?://[^\s"\'<>\\)]+', body)
+
+    found: list[str] = []
+    seen: set[str] = set()
+    for href in candidates:
+        if href.lower() in DEAD_HREFS:
+            continue
+        if not re.search(pattern, href, re.I):
+            continue
+        full = (urljoin(base, href) if base else href).rstrip("\\")
+        if full in seen:
+            continue
+        seen.add(full)
+        found.append(full)
+    return found
+
+
+# ---------------------------------------------------------------- local alerts
+
+def _bell(times: int = 3) -> None:
+    try:
+        sys.stdout.write("\a" * times)
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def _desktop(title: str, body: str) -> None:
+    """Best-effort desktop notification, whatever box this is running on."""
+    safe = body.replace("\n", " ")[:180]
+    try:
+        if shutil.which("notify-send"):
+            subprocess.run(["notify-send", "-u", "critical", title, safe],
+                           timeout=5, check=False)
+        elif shutil.which("osascript"):
+            script = (f'display notification "{safe.replace(chr(34), chr(39))}" '
+                      f'with title "{title}" sound name "Sosumi"')
+            subprocess.run(["osascript", "-e", script], timeout=5, check=False)
+        elif shutil.which("powershell.exe"):
+            subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                            "[console]::beep(1000,700)"], timeout=5, check=False)
+    except Exception as e:
+        log(f"desktop notify failed: {e}")
+
+
+def _browser(url: str) -> None:
+    """Land a human on the queue page. The human does the buying."""
+    try:
+        opener = shutil.which("xdg-open") or shutil.which("open")
+        if opener:
+            subprocess.Popen([opener, url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            webbrowser.open_new_tab(url)
+    except Exception as e:
+        log(f"browser open failed: {e}")
+
+
+async def local_alert(title: str, body: str, url: str | None) -> None:
+    """Noise on the local machine — survives a dead phone or muted Telegram."""
+    await asyncio.to_thread(_bell)
+    if LOCAL_NOTIFY:
+        await asyncio.to_thread(_desktop, title, body)
+    if AUTO_OPEN and url:
+        await asyncio.to_thread(_browser, url)
+        log(f"opened {url} locally — click Buy yourself")
 
 
 # ---------------------------------------------------------------- telegram
@@ -203,9 +315,38 @@ def evaluate(rule: dict, body: str, status: int, prev: dict) -> tuple[bool, str,
             return True, f"{rule['path']}: {old[:60]} → {sval[:60]}", marker
         return False, "", marker
 
+    if kind == "new_link":
+        # The one that matters: a dead href="#" button turning into a real
+        # queue URL. Fires on links that were NOT there last poll.
+        pattern = rule.get("pattern", LIVE_LINK_DEFAULT)
+        found = extract_links(body, pattern, rule.get("_base", ""))
+        old = set(prev.get("links") or [])
+        fresh = [u for u in found if u not in old]
+
+        # remember the union: a link that flickers away shouldn't re-alert
+        marker["links"] = sorted(old | set(found))[:200]
+        # first poll is a baseline — a tiket.com link already in the footer
+        # today is not a drop. Needs its own flag: "no links yet" is a
+        # perfectly normal baseline and must not look like "never checked".
+        baselined = prev.get("link_baseline") is True
+        marker["link_baseline"] = True
+        marker.pop("hot_link", None)
+
+        if fresh and (baselined or rule.get("fire_on_first", False)):
+            marker["hot_link"] = fresh[0]
+            listed = "\n".join(f"• {u}" for u in fresh[:5])
+            more = f"\n(+{len(fresh) - 5} more)" if len(fresh) > 5 else ""
+            plural = "S" if len(fresh) > 1 else ""
+            return True, f"LIVE LINK{plural}:\n{listed}{more}", marker
+        return False, "", marker
+
     # default: raw content hash
+    cleaned = body
+    if rule.get("ignore_volatile", True):
+        cleaned = re.sub(VOLATILE_DEFAULT, "", cleaned, flags=re.I)
     strip = rule.get("ignore_pattern")
-    cleaned = re.sub(strip, "", body) if strip else body
+    if strip:
+        cleaned = re.sub(strip, "", cleaned, flags=re.I)
     h = hashlib.sha256(cleaned.encode("utf-8", "ignore")).hexdigest()
     old = prev.get("hash")
     marker["hash"] = h
@@ -216,6 +357,20 @@ def evaluate(rule: dict, body: str, status: int, prev: dict) -> tuple[bool, str,
 
 # ---------------------------------------------------------------- polling
 
+def drop_ts(target: dict) -> float | None:
+    """Configured drop time as a unix timestamp; naive times are WIB."""
+    drop = target.get("drop_time")
+    if not drop:
+        return None
+    try:
+        t = datetime.fromisoformat(drop)
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=WIB)
+        return t.timestamp()
+    except Exception:
+        return None
+
+
 def interval_for(target: dict, state: dict) -> float:
     """Normal cadence, or hot cadence near a known drop time."""
     normal = float(target.get("interval", 8))
@@ -224,18 +379,12 @@ def interval_for(target: dict, state: dict) -> float:
     if state.get("hot_until", 0) > now():
         return hot
 
-    drop = target.get("drop_time")
-    if drop:
-        try:
-            t = datetime.fromisoformat(drop)
-            if t.tzinfo is None:
-                t = t.replace(tzinfo=WIB)
-            secs_away = t.timestamp() - now()
-            window = float(target.get("hot_window_min", 10)) * 60
-            if -300 < secs_away < window:
-                return hot
-        except Exception:
-            pass
+    ts = drop_ts(target)
+    if ts is not None:
+        secs_away = ts - now()
+        window = float(target.get("hot_window_min", 10)) * 60
+        if -300 < secs_away < window:
+            return hot
     return normal
 
 
@@ -243,12 +392,22 @@ async def check(client: httpx.AsyncClient, target: dict, state: dict) -> None:
     name = target["name"]
     tstate = state["targets"].setdefault(name, {})
     url = target["url"]
+    # one fetch, many detectors: watch for the live link AND any page change
+    rules = target.get("rules") or [target.get("rule", {})]
 
     headers = dict(BASE_HEADERS)
     headers.update(target.get("headers", {}))
     if target.get("referer"):
         headers["Referer"] = target["referer"]
+    # Opt-in only. A CDN answering 304 when the page really did change would
+    # hide the drop, so the target that matters always re-reads the full body.
+    if target.get("conditional"):
+        if tstate.get("etag"):
+            headers["If-None-Match"] = tstate["etag"]
+        if tstate.get("last_modified"):
+            headers["If-Modified-Since"] = tstate["last_modified"]
 
+    started = now()
     try:
         r = await client.get(url, headers=headers, timeout=15, follow_redirects=True)
         body, status = r.text, r.status_code
@@ -258,42 +417,92 @@ async def check(client: httpx.AsyncClient, target: dict, state: dict) -> None:
             log(f"{name}: {tstate['fails']} consecutive errors — {e}")
         return
 
+    tstate["latency_ms"] = int((now() - started) * 1000)
+
+    if status == 304:
+        tstate["fails"] = 0
+        tstate["last_check"] = now()
+        return
+
     if status in (403, 429) or status >= 500:
         tstate["fails"] = tstate.get("fails", 0) + 1
         # back off hard so we don't dig the hole deeper
         tstate["cooldown_until"] = now() + min(300, 5 * (2 ** min(tstate["fails"], 6)))
         if tstate["fails"] in (3, 10):
             log(f"{name}: HTTP {status} x{tstate['fails']}, backing off")
-        if target.get("rule", {}).get("type") != "status_ok":
+        if not any(rl.get("type") == "status_ok" for rl in rules):
             return
     else:
         tstate["fails"] = 0
+        if target.get("conditional"):
+            if r.headers.get("ETag"):
+                tstate["etag"] = r.headers["ETag"]
+            if r.headers.get("Last-Modified"):
+                tstate["last_modified"] = r.headers["Last-Modified"]
 
-    fired, detail, marker = evaluate(target.get("rule", {}), body, status, tstate)
-    tstate.update(marker)
+    markers = tstate.setdefault("rules", {})
+    fired, details, hot = False, [], None
+    for idx, rule in enumerate(rules):
+        key = str(idx)
+        try:
+            f, detail, marker = evaluate({**rule, "_base": url}, body, status,
+                                         markers.get(key, {}))
+        except Exception as e:
+            # a misconfigured rule crashes on every poll — say it once, then
+            # rarely, instead of flooding the logs at hot cadence
+            hits = tstate.get("rule_errors", {})
+            hits[key] = hits.get(key, 0) + 1
+            tstate["rule_errors"] = hits
+            if hits[key] == 1 or hits[key] % 100 == 0:
+                log(f"{name}: rule {idx} ({rule.get('type', 'changed')}) "
+                    f"crashed x{hits[key]}: {e}")
+            continue
+        markers[key] = marker
+        if f:
+            fired = True
+            details.append(detail)
+            hot = hot or marker.get("hot_link")
     tstate["last_check"] = now()
 
     if not fired:
         return
 
+    # A brand-new live checkout link is the entire point of this bot — never
+    # let a cooldown from some unrelated page edit swallow it.
+    urgent = bool(hot)
     cooldown = float(target.get("cooldown", 600))
-    if now() - tstate.get("fired_at", 0) < cooldown:
+    if not urgent and now() - tstate.get("fired_at", 0) < cooldown:
         return
     tstate["fired_at"] = now()
 
+    detail = "\n".join(d for d in details if d)
     if state.get("muted"):
         log(f"{name} FIRED (muted): {detail}")
         return
 
+    open_url = hot or target.get("open_url") or url
     msg = (
         f"🚨🚨 <b>{name}</b> 🚨🚨\n\n"
         f"{detail}\n"
         f"⏰ {wib()} WIB\n\n"
-        f"👉 {target.get('open_url', url)}\n\n"
-        f"<i>GO GO GO</i>"
+        f"👉 {open_url}\n\n"
+        f"<i>GO GO GO — tap it, you buy</i>"
     )
     await send(client, msg)
     log(f"*** ALERT: {name} — {detail}")
+    await local_alert(f"WAR TIKET — {name}", detail, open_url)
+
+    # Keep shouting. One notification arriving while the phone is face-down
+    # is exactly how this gets missed.
+    if urgent or target.get("repeat_until_ack"):
+        every = float(target.get("alert_repeat_every", 30))
+        state["pending_ack"] = {
+            "name": name,
+            "url": open_url,
+            "left": int(target.get("alert_repeat", 10)),
+            "every": every,
+            "next": now() + every,
+        }
 
     if target.get("once"):
         target["_done"] = True
@@ -342,7 +551,9 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
                         age = f"{int(now()-last)}s ago" if last else "starting…"
                         fails = ts.get("fails", 0)
                         flag = f" ⚠️ {fails} errors" if fails > 3 else ""
-                        lines.append(f"✅ {t['name']} — {age}{flag}")
+                        lat = ts.get("latency_ms")
+                        speed = f" · {lat}ms" if lat else ""
+                        lines.append(f"✅ {t['name']} — {age}{speed}{flag}")
                     if off:
                         lines.append(f"\n💤 sleeping ({len(off)})")
                         for t in off:
@@ -370,12 +581,51 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
                     state["targets"] = {}
                     await send(client, "♻️ baselines cleared", silent=True, to=origin)
 
+                elif cmd == "/ack":
+                    state["pending_ack"] = None
+                    await send(client, "✅ got it — I'll stop nagging", silent=True, to=origin)
+
+                elif cmd == "/links":
+                    lines = ["🔗 checkout links seen so far:"]
+                    found_any = False
+                    for t in config["targets"]:
+                        ts = state["targets"].get(t["name"], {})
+                        urls = []
+                        for mk in (ts.get("rules") or {}).values():
+                            urls += mk.get("links") or []
+                        if not urls:
+                            continue
+                        found_any = True
+                        lines.append(f"\n<b>{t['name']}</b>")
+                        for u in dict.fromkeys(urls):
+                            lines.append(f"• {u}")
+                    if not found_any:
+                        lines.append("nothing yet — buttons still dead (href=#)")
+                    await send(client, "\n".join(lines[:45]), silent=True, to=origin)
+
+                elif cmd == "/next":
+                    lines = ["⏳ upcoming drops:"]
+                    for t in config["targets"]:
+                        if not t.get("enabled", True) or not t.get("drop_time"):
+                            continue
+                        left = drop_ts(t)
+                        if left is None:
+                            continue
+                        secs = int(left - now())
+                        when = (f"in {secs // 3600}h {secs % 3600 // 60}m" if secs > 0
+                                else f"{-secs // 60}m ago")
+                        lines.append(f"• {t['name']} — {t['drop_time']} WIB ({when})")
+                    if len(lines) == 1:
+                        lines.append("none scheduled")
+                    await send(client, "\n".join(lines), silent=True, to=origin)
+
                 elif cmd == "/test":
                     await send(client, "🚨🚨 <b>TEST ALERT</b> 🚨🚨\n\nif this is loud, you're ready.")
 
                 else:
                     await send(client,
-                               "/status /here /hot [min] /cool /mute /unmute /reset /test",
+                               "/status /here /links /next /hot [min] /cool "
+                               "/mute /unmute /ack /reset /test",
                                silent=True, to=origin)
             save_state(state)
         except Exception as e:
@@ -422,6 +672,66 @@ async def persist(state: dict) -> None:
         save_state(state)
 
 
+async def nag(client: httpx.AsyncClient, state: dict) -> None:
+    """Re-shout a live link until a human sends /ack."""
+    while True:
+        await asyncio.sleep(5)
+        pending = state.get("pending_ack")
+        if not pending or int(pending.get("left", 0)) <= 0 or state.get("muted"):
+            continue
+        if now() < pending.get("next", 0):
+            continue
+        pending["left"] = int(pending["left"]) - 1
+        pending["next"] = now() + float(pending.get("every", 30))
+        await send(client,
+                   f"⏰ <b>STILL OPEN — {pending['name']}</b>\n\n"
+                   f"👉 {pending['url']}\n\n<i>send /ack to shut me up</i>")
+        # no url: don't reopen the browser on every repeat
+        await local_alert(f"WAR TIKET — {pending['name']}", "still open", None)
+
+
+async def countdown(client: httpx.AsyncClient, config: dict, state: dict) -> None:
+    """
+    Pre-drop pings, so you are already logged in with payment saved when the
+    window opens. Being at the keyboard 60s early beats any amount of polling.
+    """
+    marks = [(10, "10 SECONDS"), (60, "60 seconds"), (300, "5 minutes"),
+             (900, "15 minutes"), (3600, "1 hour")]
+    drops = [(ts, t) for t in config["targets"]
+             if t.get("enabled", True) and (ts := drop_ts(t)) is not None]
+    if not drops:
+        return
+    sent = state.setdefault("countdown_sent", {})
+    while True:
+        await asyncio.sleep(5)
+        for ts, target in drops:
+            left = ts - now()
+            if left <= 0:
+                continue
+            # fire only the tightest mark that applies, and retire the looser
+            # ones — otherwise starting the bot 40s before a drop would fire
+            # "1 hour", "15 minutes" and "5 minutes" all at once
+            due = [secs for secs, _ in marks if left <= secs]
+            if not due:
+                continue
+            tightest = min(due)
+            key = f"{target['name']}|{tightest}"
+            if sent.get(key):
+                continue
+            for secs, _ in marks:
+                if secs >= tightest:
+                    sent[f"{target['name']}|{secs}"] = True
+            label = next(lbl for secs, lbl in marks if secs == tightest)
+            await send(client,
+                       f"⏳ <b>{label}</b> to {target['name']}\n\n"
+                       f"logged in? payment saved? correct ticket tier picked?\n"
+                       f"👉 {target.get('open_url', target['url'])}")
+            log(f"countdown: {label} to {target['name']}")
+            if tightest <= 60:
+                await local_alert(f"WAR TIKET — {label}", target["name"],
+                                  target.get("open_url", target["url"]))
+
+
 async def main() -> None:
     config = load_json(CONFIG_PATH, None)
     if not config or not config.get("targets"):
@@ -435,7 +745,8 @@ async def main() -> None:
     limits = httpx.Limits(max_keepalive_connections=20, keepalive_expiry=300)
     async with httpx.AsyncClient(http2=False, limits=limits, follow_redirects=True) as client:
         targets = [t for t in config["targets"] if t.get("enabled", True)]
-        log(f"starting · {len(targets)} targets · DRY_RUN={DRY_RUN}")
+        log(f"starting · {len(targets)} targets · DRY_RUN={DRY_RUN} "
+            f"· LOCAL_NOTIFY={LOCAL_NOTIFY} · AUTO_OPEN={AUTO_OPEN}")
         await send(client, f"🤖 war tiket bot online · {len(targets)} targets · {wib()} WIB",
                    silent=True)
 
@@ -443,6 +754,8 @@ async def main() -> None:
         jobs.append(heartbeat(client, config, state))
         jobs.append(persist(state))
         jobs.append(poll_commands(client, config, state))
+        jobs.append(nag(client, state))
+        jobs.append(countdown(client, config, state))
         await asyncio.gather(*jobs)
 
 
