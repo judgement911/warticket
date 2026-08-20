@@ -583,7 +583,9 @@ async def check(client: httpx.AsyncClient, target: dict, state: dict) -> None:
 async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) -> None:
     """Let Ade drive the bot from Telegram itself — no laptop needed."""
     if DRY_RUN or not BOT_TOKEN:
-        return
+        # Nothing to poll. Raise the retirement signal so supervise() lets this
+        # one go instead of restarting a no-op every few seconds forever.
+        raise Retire("no telegram token")
     conflict = False
     backoff = 0.0
     while True:
@@ -856,6 +858,10 @@ async def countdown(client: httpx.AsyncClient, config: dict, state: dict) -> Non
                                   target.get("open_url", target["url"]))
 
 
+class Retire(Exception):
+    """A loop opting out for good — supervise() should not restart it."""
+
+
 async def supervise(client: httpx.AsyncClient, name: str, factory) -> None:
     """
     Keep one loop alive on its own.
@@ -870,6 +876,9 @@ async def supervise(client: httpx.AsyncClient, name: str, factory) -> None:
         try:
             await factory()
             log(f"{name}: returned on its own — restarting in {delay:g}s")
+        except Retire as why:
+            log(f"{name}: not running ({why})")
+            return
         except asyncio.CancelledError:
             raise
         except Exception as e:

@@ -102,18 +102,36 @@ Being fast at the buy button is preparation, not software:
 
 ## Targets currently configured
 
+**NCT 127 5TH TOUR 'NEO CITY : JAKARTA — THE REDLINE'** · Indonesia Arena ·
+3 Oct 2026 · Rp1,350,000–3,950,000 (+10% tax, +5% platform fee) · max 4 tickets
+per transaction, one account.
+
+| sale | when (WIB) | status |
+| --- | --- | --- |
+| NCTzen 127 membership presale | Tue 19 Aug, 14:00–21:59 | gone |
+| Dyandra Global presale | Wed 20 Aug, 14:00–21:59 | gone |
+| **General sale** | **Fri 21 Aug, 14:00 → sold out** | **this is the one** |
+
 | target | state | note |
 | --- | --- | --- |
-| Dyandra Store `-03` | on | supplied mirror — **verify the domain**, see below |
-| Dyandra Store canonical | on | `dyandraglobalstore.com`, the domain to trust |
-| Dyandra Store `-02` | off | sibling mirror, enable on drop day for full cover |
-| Maroon 5 sale site | on | `maroon5jakarta2027.com` |
-| Maroon 5 tiket.com / S.I.N. | off | see notes in `config.json` |
+| NCT 127 REDLINE — event page | on | `dyandraglobalstore-03.com`, the tour page |
+| NCT 127 REDLINE — canonical store | on | `dyandraglobalstore.com`, hedge — see below |
+| Dyandra Store `-02` | off | previous sale's mirror, most likely |
+| Maroon 5 sale site | on | unchanged |
+| Maroon 5 tiket.com / S.I.N. | off | unchanged |
 
-Neither Dyandra target has a `drop_time` yet — set one and the hot cadence plus
-countdown pings switch on automatically. The Maroon 5 drop time is
-`2026-08-29T10:00:00` WIB; verify it against the official announcement, because
-the bot is only as right as that field.
+Sold on Dyandra's own store, **not loket.com**. Both NCT targets carry
+`drop_time: 2026-08-21T14:00:00`, so the 2s cadence and the countdown pings
+switch on an hour before the drop by themselves.
+
+### Why two NCT targets
+
+Press coverage puts the general sale on `dyandraglobalstore.com`, while the
+tour page itself is served from the `-03` mirror. Neither host was reachable
+from the build environment, so which one grows the buy button is unverified.
+Watching one and guessing wrong costs the ticket; watching both costs one extra
+request every 30 seconds. Turn the canonical one off if you confirm the sale is
+`-03` only.
 
 ### On the numbered mirror domains
 

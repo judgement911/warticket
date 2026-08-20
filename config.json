@@ -1,12 +1,12 @@
 {
-  "_readme": "Primary: one NCT event page (URL still to be filled in). The Dyandra store-root targets are the off-by-default wide net. The Maroon 5 targets are left as they were. All times WIB. The monitor alerts with the real checkout link; checkout.py does the clicking and stops before paying.",
+  "_readme": "PRIMARY: NCT 127 5TH TOUR 'NEO CITY : JAKARTA - THE REDLINE', Indonesia Arena, 3 Oct 2026. General sale Fri 21 Aug 2026 14:00 WIB, max 4 tickets per transaction. Watched on both the -03 event mirror and the canonical dyandraglobalstore.com, because which host opens the buy button could not be verified from the build environment. NOT sold on loket.com. The Maroon 5 targets are left running. The monitor alerts with the real checkout link; checkout.py fills the cart and stops before payment.",
   "heartbeat_hours": 12,
   "targets": [
     {
-      "name": "🔥 NCT — event page",
-      "_note": "PASTE THE EVENT PAGE URL into url and open_url, then set enabled true. Disabled with an empty url so the bot does not poll nothing and fill the log with errors. The domain this came from (dyandraglobalstore-03.com) is a numbered mirror of dyandraglobalstore.com and was never reachable to verify — check it against Dyandra's own announcement before trusting an alert from it, because the checkout driver types your name, email, phone and KTP number into whatever page it lands on.",
-      "enabled": false,
-      "url": "",
+      "name": "🔥 NCT 127 REDLINE — event page",
+      "_note": "NCT 127 5TH TOUR 'NEO CITY : JAKARTA - THE REDLINE', 3 Oct 2026, Indonesia Arena. GENERAL SALE Fri 21 Aug 2026 14:00 WIB — the NCTzen and Dyandra presales are already gone. Max 4 tickets per transaction, one account. This -03 host is the event page itself: two search indexes show it serving the tour title, which is what finally corroborated the domain. Payment is bank VA, bank transfer or credit card — all of it yours to do by hand.",
+      "enabled": true,
+      "url": "https://dyandraglobalstore-03.com/",
       "rules": [
         {
           "_note": "Fires when a real purchase path appears — /checkout, /cart, a midtrans/xendit gateway URL, or a new /event/ page. Static assets are excluded, so a redeploy that renames checkout-<hash>.js does not read as the sale opening.",
@@ -24,16 +24,17 @@
       "hot_interval": 2,
       "hot_window_min": 60,
       "cooldown": 300,
-      "open_url": "",
+      "open_url": "https://dyandraglobalstore-03.com/",
       "alert_repeat": 12,
       "alert_repeat_every": 25,
       "launch_checkout": false,
-      "_checkout_note": "Set true once checkout.steps is filled in and tested. The monitor then spawns checkout.py against the detected link the moment the sale opens, so the clicking is already done when you pick up the phone."
+      "_checkout_note": "Set true once checkout.steps is filled in and tested. The monitor then spawns checkout.py against the detected link the moment the sale opens, so the clicking is already done when you pick up the phone.",
+      "drop_time": "2026-08-21T14:00:00"
     },
     {
-      "name": "DYANDRA STORE — canonical",
-      "_note": "Store-root wide net. Off: you chose event-page targeting. Flip on to catch any Dyandra sale, not just this one.",
-      "enabled": false,
+      "name": "🔥 NCT 127 REDLINE — canonical store",
+      "_note": "ON despite the event-page-only choice, deliberately. Press coverage says the general sale runs on dyandraglobalstore.com while the tour page lives on the -03 mirror, and nothing here could reach either to settle which host actually grows the buy button. Watching one and guessing wrong costs the ticket; watching both costs one extra request every 30s. Disable if you confirm the sale is -03 only.",
+      "enabled": true,
       "url": "https://dyandraglobalstore.com/",
       "rules": [
         {
@@ -54,11 +55,12 @@
       "cooldown": 300,
       "open_url": "https://dyandraglobalstore.com/",
       "alert_repeat": 12,
-      "alert_repeat_every": 25
+      "alert_repeat_every": 25,
+      "drop_time": "2026-08-21T14:00:00"
     },
     {
       "name": "DYANDRA STORE -02 — spare mirror",
-      "_note": "Sibling mirror, off. Only useful as part of the wide net.",
+      "_note": "Off. -03 is this event's mirror, so -02 is most likely a previous sale. Nothing to watch here unless Dyandra reshuffles hosts.",
       "enabled": false,
       "url": "https://dyandraglobalstore-02.com/",
       "rules": [
