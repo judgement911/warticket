@@ -326,8 +326,9 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
                         flag = f" ⚠️ {fails} errors" if fails > 3 else ""
                         lines.append(f"✅ {t['name']} — {age}{flag}")
                     if off:
-                        lines.append(f"\n💤 {len(off)} disabled: "
-                                     + ", ".join(t["name"] for t in off))
+                        lines.append(f"\n💤 sleeping ({len(off)})")
+                        for t in off:
+                            lines.append(f"   · {t['name']}")
                     await send(client, "\n".join(lines), silent=True)
 
                 elif cmd == "/hot":
