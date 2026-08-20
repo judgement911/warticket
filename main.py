@@ -69,6 +69,16 @@ BASE_HEADERS = {
 LIVE_LINK_DEFAULT = (r"(tiket\.com|loket\.com|queue-it\.net|ticketmaster|"
                      r"/checkout|/queue|/order|/booking)")
 
+# Bundlers name JS chunks after routes, so a Next.js store ships
+# /_next/static/chunks/pages/checkout-9f2a.js — which matches "/checkout" and
+# gets a fresh hash on every redeploy. Excluded from link detection, or a
+# routine deploy reads as the sale opening.
+ASSET_NOISE_DEFAULT = (
+    r"(?:/_next/|/_nuxt/|/static/|/assets/|/dist/|"
+    r"\.(?:js|mjs|css|map|woff2?|ttf|eot|png|jpe?g|gif|svg|webp|ico|avif|mp4)"
+    r"(?:$|[?#]))"
+)
+
 # hrefs that mean "button not wired up yet"
 DEAD_HREFS = {"", "#", "/", "javascript:void(0)", "javascript:void(0);", "javascript:;"}
 
@@ -84,6 +94,12 @@ VOLATILE_DEFAULT = "|".join([
     r"\b\d{13}\b",                                      # ms epoch
     r"\b\d{2}:\d{2}:\d{2}\b",                           # clocks
     r"\d{4}-\d{2}-\d{2}T[\d:.+Z-]+",                     # ISO timestamps
+    # Bundler fingerprints: checkout-9f2a1b.js changes on every deploy while
+    # the page says exactly the same thing. Only the hash is dropped, so a
+    # meaningful rename (banner-soon.png -> banner-live.png) still registers.
+    r"[-._][0-9a-f]{6,32}(?=\.(?:js|mjs|css|map|woff2?|ttf|png|jpe?g|gif|svg"
+    r"|webp|ico|avif))",
+    r"/_next/static/[A-Za-z0-9_-]{8,}/",                # Next.js build id
 ])
 
 
@@ -115,12 +131,16 @@ def save_state(state: dict) -> None:
 
 # ---------------------------------------------------------------- links
 
-def extract_links(body: str, pattern: str, base: str = "") -> list[str]:
+def extract_links(body: str, pattern: str, base: str = "",
+                  exclude: str | None = None) -> list[str]:
     """
     Pull every plausible checkout/queue destination out of a page.
 
     Two passes, because sale sites hide the real URL in both places: normal
     <a href> attributes, and bare URLs sitting in inline JS config blobs.
+
+    `exclude` drops static assets whose filenames happen to contain route
+    words — checked against both the raw href and the resolved URL.
     """
     candidates = [m.group(1).strip() for m in
                   re.finditer(r'href\s*=\s*["\']([^"\']+)["\']', body, re.I)]
@@ -131,9 +151,13 @@ def extract_links(body: str, pattern: str, base: str = "") -> list[str]:
     for href in candidates:
         if href.lower() in DEAD_HREFS:
             continue
+        if exclude and re.search(exclude, href, re.I):
+            continue
         if not re.search(pattern, href, re.I):
             continue
         full = (urljoin(base, href) if base else href).rstrip("\\")
+        if exclude and re.search(exclude, full, re.I):
+            continue
         if full in seen:
             continue
         seen.add(full)
@@ -319,7 +343,9 @@ def evaluate(rule: dict, body: str, status: int, prev: dict) -> tuple[bool, str,
         # The one that matters: a dead href="#" button turning into a real
         # queue URL. Fires on links that were NOT there last poll.
         pattern = rule.get("pattern", LIVE_LINK_DEFAULT)
-        found = extract_links(body, pattern, rule.get("_base", ""))
+        # set exclude_pattern to "" to keep asset URLs
+        exclude = rule.get("exclude_pattern", ASSET_NOISE_DEFAULT) or None
+        found = extract_links(body, pattern, rule.get("_base", ""), exclude)
         old = set(prev.get("links") or [])
         fresh = [u for u in found if u not in old]
 

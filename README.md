@@ -68,9 +68,19 @@ list against it, so adding a detector costs no extra requests.
 - **It nags.** `alert_repeat` / `alert_repeat_every` re-shout until you `/ack`,
   because one notification arriving face-down is how this gets missed.
 
+`new_link` also excludes static assets by default (`exclude_pattern`). Bundlers
+name JS chunks after routes, so a Next.js store ships
+`/_next/static/chunks/pages/checkout-9f2a1b.js` — that matches `/checkout` and
+gets a new hash on every deploy. Without the exclusion a routine redeploy fires
+a "LIVE LINK" alert pointing at a `.js` file. Set `exclude_pattern: ""` to keep
+asset URLs.
+
 `changed` strips per-request noise (CSRF meta tags, nonces, cache-busters,
-timestamps, ms epochs) before hashing. Without that it fires every poll on a
-rotating token, and an alert you learn to ignore is worse than no alert.
+timestamps, ms epochs, bundler fingerprints, Next.js build ids) before hashing.
+Without that it fires every poll on a rotating token and again on every deploy,
+and an alert you learn to ignore is worse than no alert. Only the *hash* part of
+an asset name is dropped, so a meaningful rename — `banner-soon.png` →
+`banner-live.png` — still registers.
 
 Timing: `interval` normally, `hot_interval` within `hot_window_min` of
 `drop_time`. Countdown pings land at T-1h, 15m, 5m, 60s and 10s. 403/429/5xx
@@ -90,5 +100,27 @@ Being fast at the buy button is preparation, not software:
 - [ ] wired connection if you have one; hotspot as backup
 - [ ] `/test` fired and audible, phone off silent, bot `/status` green
 
-Drop time in `config.json` is `2026-08-29T10:00:00` WIB. Verify it against the
-official announcement — the bot is only as right as that field.
+## Targets currently configured
+
+| target | state | note |
+| --- | --- | --- |
+| Dyandra Store `-03` | on | supplied mirror — **verify the domain**, see below |
+| Dyandra Store canonical | on | `dyandraglobalstore.com`, the domain to trust |
+| Dyandra Store `-02` | off | sibling mirror, enable on drop day for full cover |
+| Maroon 5 sale site | on | `maroon5jakarta2027.com` |
+| Maroon 5 tiket.com / S.I.N. | off | see notes in `config.json` |
+
+Neither Dyandra target has a `drop_time` yet — set one and the hot cadence plus
+countdown pings switch on automatically. The Maroon 5 drop time is
+`2026-08-29T10:00:00` WIB; verify it against the official announcement, because
+the bot is only as right as that field.
+
+### On the numbered mirror domains
+
+Dyandra sells through `dyandraglobalstore.com` and spins up numbered mirrors
+(`-02`, `-03`) to shed load during a heavy sale. A numbered lookalike is also
+exactly how a card-harvesting clone presents itself, and this bot's whole job is
+to make you tap a link fast without thinking about it. Before drop day, confirm
+the mirror domain appears in Dyandra's own announcement — their site or verified
+social account, not a link forwarded to you. If the mirror and the canonical
+store ever disagree, trust the canonical store.
