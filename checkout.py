@@ -228,6 +228,24 @@ def do_fill_profile(page, profile: dict) -> int:
                 break
             except Exception:
                 continue
+        if hit:
+            continue
+        # id_type and country are normally dropdowns, not text boxes.
+        for pat in (f'select[name*="{key}" i]', f'select[id*="{key}" i]'):
+            loc = page.locator(pat).first
+            try:
+                if loc.count() == 0 or not loc.is_visible():
+                    continue
+                try:
+                    loc.select_option(label=str(value), timeout=5000)
+                except Exception:
+                    loc.select_option(str(value), timeout=5000)
+                log(f"  selected {key}")
+                filled += 1
+                hit = True
+                break
+            except Exception:
+                continue
         if not hit:
             log(f"  no field found for {key!r}")
     return filled
