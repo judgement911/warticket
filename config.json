@@ -1,0 +1,113 @@
+{
+  "_readme": "Edit this file to add your targets. Delete any you don't need. interval = seconds between checks (normal). hot_interval kicks in near drop_time or when you send /hot in Telegram.",
+
+  "heartbeat_hours": 6,
+
+  "targets": [
+
+    {
+      "name": "Ticketmaster — Coldplay",
+      "_note": "BEST OPTION for TM. Free API key from developer.ticketmaster.com — no scraping, no blocking. Swap YOUR_KEY and the keyword.",
+      "enabled": false,
+      "url": "https://app.ticketmaster.com/discovery/v2/events.json?keyword=coldplay&countryCode=SG&apikey=YOUR_KEY",
+      "rule": {
+        "type": "json",
+        "path": "_embedded.events.0.dates.status.code",
+        "equals": "onsale"
+      },
+      "interval": 20,
+      "hot_interval": 3,
+      "open_url": "https://www.ticketmaster.sg",
+      "cooldown": 900
+    },
+
+    {
+      "name": "Tiket.com — event page",
+      "_note": "Tiket.com is a Next.js site. The whole page state sits in a __NEXT_DATA__ JSON blob — the bot digs it out automatically. Find the right path by viewing source once.",
+      "enabled": false,
+      "url": "https://www.tiket.com/to-do/YOUR-EVENT-SLUG",
+      "rule": {
+        "type": "json_changed",
+        "path": "props.pageProps.data.availability"
+      },
+      "interval": 10,
+      "hot_interval": 1.5,
+      "drop_time": "2026-09-01T10:00:00",
+      "hot_window_min": 15,
+      "cooldown": 600
+    },
+
+    {
+      "name": "Loket — event",
+      "_note": "Watch for the buy button appearing. Open the page in Safari, tap Share > find the exact button text first (e.g. 'BELI TIKET', 'Pilih Tiket').",
+      "enabled": false,
+      "url": "https://www.loket.com/event/YOUR-EVENT",
+      "rule": { "type": "appears", "value": "BELI TIKET", "fire_on_first": false },
+      "interval": 8,
+      "hot_interval": 1.5,
+      "cooldown": 600
+    },
+
+    {
+      "name": "Loket — sold out watch (restock)",
+      "_note": "Opposite direction: fires when SOLD OUT disappears. Great for catching released/cancelled seats.",
+      "enabled": false,
+      "url": "https://www.loket.com/event/YOUR-EVENT",
+      "rule": { "type": "disappears", "value": "Sold Out" },
+      "interval": 15,
+      "cooldown": 300
+    },
+
+    {
+      "name": "Ticket2U — event",
+      "_note": "Plain HTML site. ignore_pattern strips timestamps/CSRF tokens that change every load and would cause false alarms.",
+      "enabled": false,
+      "url": "https://www.ticket2u.com.my/event/YOUR-EVENT",
+      "rule": {
+        "type": "changed",
+        "ignore_pattern": "(csrf[^\"]*\"[^\"]*\"|_token[^\"]*\"[^\"]*\"|\\d{2}:\\d{2}:\\d{2})"
+      },
+      "interval": 15,
+      "cooldown": 600
+    },
+
+    {
+      "name": "Shopee — flash sale item",
+      "_note": "Get item_id and shop_id from the product URL: shopee.co.id/…-i.SHOPID.ITEMID. Shopee blocks hard — if you see 403 in logs, drop back to watching the normal product page with a 'changed' rule and a slower interval.",
+      "enabled": false,
+      "url": "https://shopee.co.id/api/v4/pdp/get_pc?item_id=ITEMID&shop_id=SHOPID",
+      "headers": {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      "referer": "https://shopee.co.id/",
+      "rule": { "type": "json", "path": "data.item.stock", "greater_than": 0 },
+      "interval": 20,
+      "hot_interval": 4,
+      "open_url": "https://shopee.co.id/product/SHOPID/ITEMID",
+      "cooldown": 300
+    },
+
+    {
+      "name": "Tokopedia — product",
+      "_note": "Tokopedia's real API is GraphQL/POST and locked down. Watching the public product page for the stock text flipping is more reliable. Confirm the exact wording on the page first — 'Stok habis' vs 'Produk tidak tersedia'.",
+      "enabled": false,
+      "url": "https://www.tokopedia.com/SELLER/PRODUCT-SLUG",
+      "rule": { "type": "disappears", "value": "Stok habis" },
+      "interval": 20,
+      "hot_interval": 4,
+      "cooldown": 300
+    },
+
+    {
+      "name": "TEST — GitHub status",
+      "_note": "Leave this on for the first run so you can confirm the pipes work end to end. Turn it off after.",
+      "enabled": true,
+      "url": "https://api.github.com/zen",
+      "rule": { "type": "changed" },
+      "interval": 20,
+      "cooldown": 60
+    }
+
+  ]
+}
