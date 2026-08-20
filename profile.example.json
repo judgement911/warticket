@@ -1,0 +1,13 @@
+{
+  "_note": "Copy to profile.json and fill in. profile.json is gitignored. Only the keys below are ever typed into a page — see ALLOWED_PROFILE_KEYS in checkout.py. There is deliberately no card field: the driver stops before payment, so it never needs one, and a card number sitting in a JSON file on disk is a bad trade for the two seconds it saves.",
+  "full_name": "",
+  "email": "",
+  "phone": "",
+  "id_number": "",
+  "id_type": "KTP",
+  "birth_date": "",
+  "address": "",
+  "city": "",
+  "postcode": "",
+  "country": "Indonesia"
+}

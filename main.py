@@ -47,9 +47,13 @@ CHAT_IDS = [c.strip() for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",")
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
 LOCAL_NOTIFY = os.environ.get("LOCAL_NOTIFY", "") == "1"
 AUTO_OPEN = os.environ.get("AUTO_OPEN", "") == "1"
+# DRY_RUN keeps the browser parked, so a rehearsal can never go clicking a real
+# store. Set this to exercise the whole chain end to end against a fixture.
+REHEARSE_CHECKOUT = os.environ.get("REHEARSE_CHECKOUT", "") == "1"
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 HERE = Path(__file__).parent
+CHECKOUT_PATH = HERE / "checkout.py"
 CONFIG_PATH = HERE / "config.json"
 STATE_PATH = HERE / "state.json"
 
@@ -251,6 +255,36 @@ async def send(client: httpx.AsyncClient, text: str, silent: bool = False, to=No
 
 
 # ---------------------------------------------------------------- rule engine
+
+def launch_checkout(url: str, name: str) -> int | None:
+    """
+    Hand the detected link straight to the browser driver.
+
+    Fire-and-forget on purpose: the poll loop must not block on a browser, and
+    a checkout that dies is not allowed to take the monitor down with it. The
+    driver stops before payment on its own — see checkout.py.
+    """
+    if DRY_RUN and not REHEARSE_CHECKOUT:
+        log(f"{name}: would launch checkout on {url} "
+            f"(REHEARSE_CHECKOUT=1 to really run it)")
+        return None
+    if not CHECKOUT_PATH.exists():
+        log(f"{name}: checkout.py missing, not launching")
+        return None
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(CHECKOUT_PATH), "run", url],
+            cwd=str(HERE),
+            stdout=open(HERE / "checkout.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        log(f"{name}: checkout launched (pid {proc.pid}) -> checkout.log")
+        return proc.pid
+    except Exception as e:
+        log(f"{name}: could not launch checkout: {e}")
+        return None
+
 
 def dig(obj, path: str):
     """Walk a dotted path through dicts/lists: 'data.items.0.status'."""
@@ -529,6 +563,15 @@ async def check(client: httpx.AsyncClient, target: dict, state: dict) -> None:
             "every": every,
             "next": now() + every,
         }
+
+    # Only on a real detected link, and only once: relaunching a browser on
+    # every poll would be its own outage.
+    if target.get("launch_checkout") and hot and not tstate.get("checkout_started"):
+        tstate["checkout_started"] = now()
+        pid = launch_checkout(hot, name)
+        if pid:
+            await send(client, f"🤖 checkout driver started on <code>{hot}</code>"
+                               f" — it will stop at the payment page and ping you.")
 
     if target.get("once"):
         target["_done"] = True

@@ -124,3 +124,79 @@ to make you tap a link fast without thinking about it. Before drop day, confirm
 the mirror domain appears in Dyandra's own announcement — their site or verified
 social account, not a link forwarded to you. If the mirror and the canonical
 store ever disagree, trust the canonical store.
+
+## Checkout automation (`checkout.py`)
+
+The monitor tells you a sale opened. This does the clicking: picks the tier,
+sets the quantity, fills your details from `profile.json`, advances — and stops
+when the next thing it would touch is a payment.
+
+    pip install playwright                     # Chromium is already installed
+    python3 checkout.py login <store-url>      # log in by hand, once
+    python3 checkout.py inspect <url>          # dump the real selectors
+    python3 checkout.py run <checkout-url>     # walk it, halt at payment
+
+### It does not pay
+
+That line is load-bearing, not a disclaimer. Three independent guards, each
+tested:
+
+- **Never clicks a payment control.** Every click is checked against the
+  element's own text and attributes first. `BAYAR SEKARANG`, `Pay Now`,
+  `Buat Pesanan`, `Confirm and Pay`, a bank-transfer or GoPay/OVO/QRIS option —
+  refused. A step map that explicitly names the pay button is still refused;
+  the map is a guess about someone else's HTML, the guard isn't.
+- **Never types card data.** Fields that look like a card number, CVV, expiry
+  or password are skipped even when they sit inline with the buyer form, and
+  only an allowlist of buyer keys is ever typed at all. Put a card number in
+  `profile.json` and it will be ignored, loudly.
+- **Stops on arrival at a payment page.** Checked before each step, so it halts
+  even if your map would have carried on.
+
+It then screenshots, pings your phone, and leaves the browser open with your
+session in it. You check the total and pay. `profile.json`, `browser-profile/`
+and `shots/` are gitignored — the profile directory *is* your login.
+
+### Selectors are yours to fill in
+
+`config.json -> checkout.steps` ships **empty**. Neither Dyandra domain was
+reachable from the machine this was built on, so any selector written here
+would be invented. Run `inspect` against the live page and build the list from
+what it prints — it dumps every visible button, link, input and select with a
+usable selector, plus `data-testid` where one exists (generated ids rotate
+between deploys; an intentional test id usually doesn't).
+
+`inspect` also answers the question that decides whether any of this works: if
+it reports almost no rendered HTML, the page is a JavaScript shell, and the
+HTTP monitor in `main.py` cannot see it either — that target needs this browser
+rather than `httpx`.
+
+### Mark the entry steps optional
+
+The monitor hands over whatever URL it detected, which is often already several
+steps into the flow. Steps marked `"optional": true` are skipped when their
+element isn't on the page (in ~2.5s, not the full timeout), so one map works
+whether the link drops you on the event page or straight into the cart.
+
+### Automatic handoff
+
+Set `launch_checkout: true` on a target and the monitor spawns the driver
+against the detected link the moment the sale opens, so the clicking is already
+done when you pick up the phone. Output goes to `checkout.log`. Off by default
+— fill in the steps and rehearse first.
+
+To rehearse the whole chain without notifying anyone or touching a real store,
+point a target at a local fixture and run with `DRY_RUN=1 REHEARSE_CHECKOUT=1`.
+`DRY_RUN` alone deliberately parks the browser, so a rehearsal can never go
+clicking a live sale.
+
+### Tests
+
+    python3 test_checkout.py     # 51 assertions, weighted on the guards
+    python3 test_cmds.py         # Telegram command handlers
+
+`test_checkout.py` serves a fake Dyandra-shaped store locally — tier page,
+buyer form with card inputs sitting next to the real ones, payment page — and
+asserts the driver walks it, fills four fields, skips both card inputs, and
+stops without paying. Nothing leaves the machine.
+

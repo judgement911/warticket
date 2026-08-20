@@ -1,4 +1,9 @@
+# your details and your logged-in session — never commit these
+profile.json
+browser-profile/
+selectors-dump.txt
+shots/
+
 state.json
 __pycache__/
 *.pyc
-.env

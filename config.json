@@ -26,7 +26,9 @@
       "cooldown": 300,
       "open_url": "https://dyandraglobalstore-03.com/",
       "alert_repeat": 12,
-      "alert_repeat_every": 25
+      "alert_repeat_every": 25,
+      "launch_checkout": false,
+      "_checkout_note": "Set true once checkout.steps is filled in and tested. The monitor then spawns checkout.py against the detected link the moment the sale opens, so the clicking is already done when you pick up the phone."
     },
     {
       "name": "DYANDRA STORE — canonical",
@@ -130,5 +132,38 @@
       "interval": 300,
       "cooldown": 3600
     }
-  ]
+  ],
+  "checkout": {
+    "_note": "Steps for checkout.py. EMPTY ON PURPOSE — the store's real DOM was never reachable from here, so any selectors written now would be guesses. Run `python3 checkout.py inspect <url>` against the live page and build the list from what it prints. Actions: click, select, fill, fill_profile, wait_for, goto, screenshot, sleep. Each step takes selector or text, plus optional note/timeout/settle/optional. The driver halts before anything that looks like paying, whatever these steps say. Mark the entry steps \"optional\": true — the monitor hands over whatever URL it detected, which is often already several steps in, and an optional step that isn't there is skipped instead of stalling.",
+    "_example": [
+      {
+        "do": "click",
+        "selector": "#buy-button",
+        "note": "BELI TIKET — optional: the detected link may already be past this",
+        "optional": true
+      },
+      {
+        "do": "click",
+        "text": "CAT 1",
+        "note": "tier",
+        "optional": true
+      },
+      {
+        "do": "select",
+        "selector": "#qty",
+        "value": "2"
+      },
+      {
+        "do": "fill_profile",
+        "note": "buyer details from profile.json"
+      },
+      {
+        "do": "click",
+        "text": "LANJUTKAN",
+        "note": "to payment — halts here"
+      }
+    ],
+    "step_timeout": 15,
+    "steps": []
+  }
 }
