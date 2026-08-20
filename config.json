@@ -1,12 +1,12 @@
 {
-  "_readme": "Dyandra Global Store watch (primary) + the earlier Maroon 5 targets. Dyandra sells through dyandraglobalstore.com and numbered load mirrors; the -03 mirror is the one supplied and is UNVERIFIED — check it against Dyandra's official announcement. All times WIB. The bot alerts with the real checkout link; it does not buy.",
+  "_readme": "Primary: one NCT event page (URL still to be filled in). The Dyandra store-root targets are the off-by-default wide net. The Maroon 5 targets are left as they were. All times WIB. The monitor alerts with the real checkout link; checkout.py does the clicking and stops before paying.",
   "heartbeat_hours": 12,
   "targets": [
     {
-      "name": "🔥 DYANDRA STORE -03 — sale mirror",
-      "_note": "PRIMARY. Numbered mirror of dyandraglobalstore.com; Dyandra spins these up to shed load on a war-ticket sale. UNVERIFIED FROM HERE — confirm the -03 domain appears in Dyandra's own announcement before trusting an alert from it, because a numbered lookalike is also how a card-harvesting clone presents itself. Set drop_time once the on-sale time is announced; until then it polls at the normal rate and /hot forces fast mode.",
-      "enabled": true,
-      "url": "https://dyandraglobalstore-03.com/",
+      "name": "🔥 NCT — event page",
+      "_note": "PASTE THE EVENT PAGE URL into url and open_url, then set enabled true. Disabled with an empty url so the bot does not poll nothing and fill the log with errors. The domain this came from (dyandraglobalstore-03.com) is a numbered mirror of dyandraglobalstore.com and was never reachable to verify — check it against Dyandra's own announcement before trusting an alert from it, because the checkout driver types your name, email, phone and KTP number into whatever page it lands on.",
+      "enabled": false,
+      "url": "",
       "rules": [
         {
           "_note": "Fires when a real purchase path appears — /checkout, /cart, a midtrans/xendit gateway URL, or a new /event/ page. Static assets are excluded, so a redeploy that renames checkout-<hash>.js does not read as the sale opening.",
@@ -24,7 +24,7 @@
       "hot_interval": 2,
       "hot_window_min": 60,
       "cooldown": 300,
-      "open_url": "https://dyandraglobalstore-03.com/",
+      "open_url": "",
       "alert_repeat": 12,
       "alert_repeat_every": 25,
       "launch_checkout": false,
@@ -32,8 +32,8 @@
     },
     {
       "name": "DYANDRA STORE — canonical",
-      "_note": "The confirmed-real store. Worth watching even if the sale runs on a mirror: the announcement, the event page and the queue link normally land here too, and this is the domain to trust if the two disagree.",
-      "enabled": true,
+      "_note": "Store-root wide net. Off: you chose event-page targeting. Flip on to catch any Dyandra sale, not just this one.",
+      "enabled": false,
       "url": "https://dyandraglobalstore.com/",
       "rules": [
         {
@@ -58,7 +58,7 @@
     },
     {
       "name": "DYANDRA STORE -02 — spare mirror",
-      "_note": "OFF by default. If -03 is one of a numbered series, the sale may open on a sibling instead. Flip enabled to true on drop day if you want all mirrors covered.",
+      "_note": "Sibling mirror, off. Only useful as part of the wide net.",
       "enabled": false,
       "url": "https://dyandraglobalstore-02.com/",
       "rules": [
