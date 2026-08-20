@@ -14,6 +14,8 @@ Optional:
 Run:  python main.py
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
@@ -314,13 +316,18 @@ async def poll_commands(client: httpx.AsyncClient, config: dict, state: dict) ->
                     lines = [f"🤖 alive · {wib()} WIB",
                              f"muted: {bool(state.get('muted'))}",
                              f"hot: {'yes' if state.get('hot_until',0) > now() else 'no'}", ""]
-                    for t in config["targets"]:
+                    live = [t for t in config["targets"] if t.get("enabled", True)]
+                    off = [t for t in config["targets"] if not t.get("enabled", True)]
+                    for t in live:
                         ts = state["targets"].get(t["name"], {})
                         last = ts.get("last_check")
-                        age = f"{int(now()-last)}s ago" if last else "never"
+                        age = f"{int(now()-last)}s ago" if last else "starting…"
                         fails = ts.get("fails", 0)
-                        flag = " ⚠️" if fails > 3 else ""
-                        lines.append(f"• {t['name']} — {age}{flag}")
+                        flag = f" ⚠️ {fails} errors" if fails > 3 else ""
+                        lines.append(f"✅ {t['name']} — {age}{flag}")
+                    if off:
+                        lines.append(f"\n💤 {len(off)} disabled: "
+                                     + ", ".join(t["name"] for t in off))
                     await send(client, "\n".join(lines), silent=True)
 
                 elif cmd == "/hot":
