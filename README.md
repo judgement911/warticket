@@ -145,6 +145,13 @@ store ever disagree, trust the canonical store.
 
 ## Checkout automation (`checkout.py`)
 
+**Needs a desktop or laptop. It cannot run on a phone.** It drives a real
+Chromium through Python, and there is no Python and no controllable browser on
+iOS or Android. If your only device is a phone, skip this whole section — the
+monitor and its countdown pings are the parts that work for you, and the
+buying is done by thumb in Safari. See *Buying from a phone* below.
+
+
 The monitor tells you a sale opened. This does the clicking: picks the tier,
 sets the quantity, fills your details from `profile.json`, advances — and stops
 when the next thing it would touch is a payment.
@@ -247,3 +254,24 @@ If the bot is silent, in order: check whether a second instance is running,
 check the process is alive at all, then check `heartbeat_hours` against how
 long it has actually been quiet.
 
+
+## Buying from a phone
+
+No `checkout.py`, so speed comes from preparation instead of automation. Before
+the drop:
+
+- Log in to the store in Safari and let iOS save the password, so the login
+  page is one tap and not a typing race.
+- Fill in Settings → Safari → AutoFill (name, email, phone) so the buyer form
+  autocompletes.
+- Add the fields iOS will not autofill — KTP number especially — as Settings →
+  General → Keyboard → Text Replacement shortcuts. A KTP number is sixteen
+  digits; typing it under a five-minute cart timer is where seats are lost.
+- Have the payment app already open in another tab or app, logged in.
+- Leave the store page open and idle, then pull to refresh at the drop rather
+  than loading it cold.
+
+The countdown pings (1 hour, 15 min, 5 min, 60s, 10s) exist for exactly this:
+they are the difference between being on the page early and arriving to a
+queue. Targets that share a drop time send one ping per mark, not one per
+target, so the pings stay worth reading.

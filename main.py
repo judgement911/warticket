@@ -823,14 +823,24 @@ async def countdown(client: httpx.AsyncClient, config: dict, state: dict) -> Non
     """
     marks = [(10, "10 SECONDS"), (60, "60 seconds"), (300, "5 minutes"),
              (900, "15 minutes"), (3600, "1 hour")]
-    drops = [(ts, t) for t in config["targets"]
-             if t.get("enabled", True) and (ts := drop_ts(t)) is not None]
+    # Group by drop time. Watching one sale on a mirror and its canonical host
+    # is two targets sharing one 14:00, and a phone does not need each mark
+    # twice — that is how you learn to swipe the bot away.
+    groups: dict[float, list[dict]] = {}
+    for t in config["targets"]:
+        if not t.get("enabled", True):
+            continue
+        ts = drop_ts(t)
+        if ts is not None:
+            groups.setdefault(ts, []).append(t)
+    drops = sorted(groups.items())
     if not drops:
         return
     sent = state.setdefault("countdown_sent", {})
     while True:
         await asyncio.sleep(5)
-        for ts, target in drops:
+        for ts, sharing in drops:
+            target = sharing[0]
             left = ts - now()
             if left <= 0:
                 continue
@@ -841,17 +851,19 @@ async def countdown(client: httpx.AsyncClient, config: dict, state: dict) -> Non
             if not due:
                 continue
             tightest = min(due)
-            key = f"{target['name']}|{tightest}"
+            key = f"{ts:.0f}|{tightest}"
             if sent.get(key):
                 continue
             for secs, _ in marks:
                 if secs >= tightest:
-                    sent[f"{target['name']}|{secs}"] = True
+                    sent[f"{ts:.0f}|{secs}"] = True
             label = next(lbl for secs, lbl in marks if secs == tightest)
+            also = "".join(
+                f"\nbackup: {t.get('open_url', t['url'])}" for t in sharing[1:])
             await send(client,
                        f"⏳ <b>{label}</b> to {target['name']}\n\n"
-                       f"logged in? payment saved? correct ticket tier picked?\n"
-                       f"👉 {target.get('open_url', target['url'])}")
+                       f"logged in? payment ready? tier decided?\n"
+                       f"👉 {target.get('open_url', target['url'])}{also}")
             log(f"countdown: {label} to {target['name']}")
             if tightest <= 60:
                 await local_alert(f"WAR TIKET — {label}", target["name"],
