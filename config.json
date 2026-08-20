@@ -1,10 +1,7 @@
 {
   "_readme": "Maroon 5 Asia 2027 — Jakarta, JIS, 5 Feb 2027. Sales run through maroon5jakarta2027.com, NOT the tiket.com explore page. All times WIB.",
-
   "heartbeat_hours": 12,
-
   "targets": [
-
     {
       "name": "🔥 MAROON 5 — official sale site",
       "_note": "PRIMARY. Right now the Artist Presale / BCA Presale / General On-Sale buttons are dead links (href=#). When a window opens they become real tiket.com queue links — that is the change this catches. Server-rendered, so the bot sees the real HTML.",
@@ -21,11 +18,10 @@
       "cooldown": 300,
       "open_url": "https://maroon5jakarta2027.com/"
     },
-
     {
       "name": "MAROON 5 — tiket.com backup",
-      "_note": "SECONDARY. This page is JavaScript-rendered, so the bot only sees the page shell — it will NOT see a BELI TIKET button appear. Kept because the shell metadata usually changes when an event flips live. Bonus signal, not the main one.",
-      "enabled": true,
+      "_note": "DISABLED — tiket.com returns 403 to datacenter IPs, and the page is JavaScript-rendered so the bot could never see button text anyway. The official sale site target is the real one. Leave this off.",
+      "enabled": false,
       "url": "https://www.tiket.com/id-id/explore/maroon5asiajakarta",
       "rule": {
         "type": "changed",
@@ -37,16 +33,16 @@
       "hot_window_min": 60,
       "cooldown": 900
     },
-
     {
       "name": "MAROON 5 — S.I.N. fan club signup",
       "_note": "Artist Presale on 26 Aug needs a code from this fan club. Watches the signup page in case tiers or availability change. Off by default — enable only if you join.",
       "enabled": false,
       "url": "https://maroon5sin.com/subscribe",
-      "rule": { "type": "changed" },
+      "rule": {
+        "type": "changed"
+      },
       "interval": 300,
       "cooldown": 3600
     }
-
   ]
 }
