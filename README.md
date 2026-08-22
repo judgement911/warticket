@@ -323,9 +323,20 @@ instead. Waiting for buyer fields there waits forever.
 **No fingerprint spoofing and no CAPTCHA solving.** Those exist to defeat a
 site's own bot detection, which is a different thing from automating your own
 clicks. The practical consequence is real: Tiket.com may detect this browser
-and challenge it. When that happens the run stops, tells you which stage, and
-leaves the window open — solve the challenge yourself and it carries on. A
-tool that quietly fails at 14:00:00 would be worse than one that says so.
+and challenge it.
+
+What happens then is a **human-in-the-loop pause**, not a bypass. The run
+notices it is blocked, messages you, and waits. You solve the challenge with
+your own mouse in the Chromium window already open on your desk — the same
+window the bot is driving, so your click and its clicks land on one session.
+The moment the challenge clears, the stage retries and the run continues.
+Default wait is 10 minutes, then it gives up rather than hanging.
+
+This only works with a **visible browser**. `HEADLESS=1` has no window to click
+in, so a challenge can only time out; the run warns you at startup if you set
+it. Detection is on *visible* challenge elements only — a background reCAPTCHA
+loads an invisible iframe on nearly every page it protects, and treating that
+as a block would stall a run that was never stopped.
 
 **No card, ever.** `choose_payment` picks Virtual Account or QRIS and skips
 card options outright: that path ends at a 3-D Secure OTP, which is both a

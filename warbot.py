@@ -41,6 +41,7 @@ import httpx
 
 from checkout import CHROME, HEADLESS, WIB, browser, log, shot, wib
 from platforms import Buyer, Outcome, Target, get_handler, guess_platform
+from platforms.base import challenge_visible, wait_for_human
 
 HERE = Path(__file__).resolve().parent
 STATE = HERE / "warstate.json"
@@ -177,6 +178,36 @@ class Runner:
                 return
             page.wait_for_timeout(250)
 
+    def _stage(self, name: str, page, fn):
+        """
+        Run one stage. If a challenge blocks it, wait for the human to clear it
+        and try the stage once more.
+
+        Nothing here reads or solves a challenge — it waits for you to. That is
+        why the browser must be visible: a headless run has no window for you
+        to click in, and the wait can only time out.
+        """
+        self.stage = name
+        blocked = challenge_visible(page)
+        if blocked:
+            wait_for_human(page, blocked, on_pause=self._say_paused)
+        try:
+            return fn()
+        except Exception:
+            blocked = challenge_visible(page)
+            if not blocked:
+                raise
+            log(f"  {name} failed with a challenge on screen — pausing")
+            if not wait_for_human(page, blocked, on_pause=self._say_paused):
+                raise
+            return fn()          # one retry, now that you have cleared it
+
+    def _say_paused(self, what: str) -> None:
+        send(f"🧩 <b>CAPTCHA — your turn</b>\n\n"
+             f"a challenge is on screen (<code>{html.escape(str(what))[:60]}</code>).\n"
+             f"Solve it in the browser window on your computer; the run "
+             f"continues by itself the moment it clears.")
+
     def _run(self, state: dict, at: float | None) -> None:
         out = Outcome()
         plat = state.get("platform") or guess_platform(
@@ -185,35 +216,44 @@ class Runner:
         buyer, target = buyer_of(state), target_of(state)
         from playwright.sync_api import sync_playwright
 
+        if HEADLESS:
+            send("⚠️ <b>HEADLESS=1</b> — there is no window to click in. A "
+                 "CAPTCHA cannot be solved and the run will stall on one. "
+                 "Unset HEADLESS to get a visible browser.")
         try:
             with sync_playwright() as pw:
                 ctx = browser(pw)
                 page = ctx.pages[0] if ctx.pages else ctx.new_page()
                 page.set_default_timeout(15000)
+                self._page = page
 
                 self.stage = out.stage = "standby"
                 self._burst(page, target.url, at, handler)
 
-                self.stage = out.stage = "queue"
+                out.stage = "queue"
                 try:
-                    handler.enter_queue(page)
+                    self._stage("queue", page, lambda: handler.enter_queue(page))
                 except TimeoutError as e:
                     log(f"  entry: {e} — may already be inside")
-                waited = handler.wait_through_queue(page)
+                waited = self._stage("queue-wait", page,
+                                     lambda: handler.wait_through_queue(page))
                 send(f"✅ <b>through the queue</b> after {waited/60:.1f} min\n"
                      f"locking {target.quantity} × {target.category_name}…")
 
-                self.stage = out.stage = "seat"
-                handler.lock_seat(page, target)
+                out.stage = "seat"
+                self._stage("seat", page, lambda: handler.lock_seat(page, target))
                 page.wait_for_timeout(1200)
 
-                self.stage = out.stage = "form"
-                n = handler.fill_contact(page, buyer)
+                out.stage = "form"
+                n = self._stage("form", page,
+                                lambda: handler.fill_contact(page, buyer))
                 log(f"  filled {n} field(s)")
                 page.wait_for_timeout(800)
 
-                self.stage = out.stage = "payment"
-                kind = handler.choose_payment(page, target.prefer_payment)
+                out.stage = "payment"
+                kind = self._stage("payment", page,
+                                   lambda: handler.choose_payment(
+                                       page, target.prefer_payment))
                 page.wait_for_timeout(2500)
                 got_kind, ref = handler.read_payment_reference(page)
                 out.payment_kind = got_kind or kind
@@ -233,16 +273,24 @@ class Runner:
                          f"the number did not parse.\nRead it off the screen: "
                          f"{out.url}")
                 log(f"screenshot: {png}")
-                # hold the browser open so the human can finish
-                while not self.abort.is_set():
-                    time.sleep(2)
+
+                # Hold the window open on every path. This used to sit
+                # outside the `with`, so a failure tore Playwright down and
+                # closed the browser while the message said it was open —
+                # exactly when you most need the page in front of you.
+                if not HEADLESS:
+                    log("browser stays open — /abort to close")
+                    while not self.abort.is_set():
+                        time.sleep(2)
 
         except Exception as e:
             out.detail = f"{type(e).__name__}: {e}"
             log(f"STOPPED at {self.stage}: {out.detail}")
             send(f"🛑 <b>stopped at {html.escape(self.stage)}</b>\n\n"
                  f"<code>{html.escape(str(e))[:400]}</code>\n\n"
-                 f"browser is open — finish by hand")
+                 + ("browser is closed (HEADLESS=1) — rerun with a window "
+                    "to finish by hand" if HEADLESS else
+                    "browser is open — finish it by hand, /abort to close"))
         finally:
             self.stage = "idle"
 

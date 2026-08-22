@@ -41,6 +41,63 @@ CARD_METHOD = re.compile(
 VA_NUMBER = re.compile(r"\b(\d[\d\s-]{9,24}\d)\b")
 
 
+# A challenge the human has to clear. Detected so the run can PAUSE for you,
+# never to get around it. Matching is deliberately on *visible* elements: a
+# background reCAPTCHA loads an invisible iframe on every page it protects, and
+# treating that as a challenge would stop a run that was never blocked.
+CHALLENGE_FRAMES = (
+    "iframe[src*='recaptcha/api2/bframe']",     # the image-grid popup
+    "iframe[src*='recaptcha/api2/anchor']",     # the "I'm not a robot" tickbox
+    "iframe[src*='hcaptcha.com']",
+    "iframe[src*='challenges.cloudflare.com']",
+)
+CHALLENGE_WORDS = re.compile(
+    r"(verify (that )?you\s*(are|'?re)\s*(a\s*)?human|i'?m not a robot|"
+    r"saya bukan robot|bukan robot|verifikasi keamanan|cek keamanan|"
+    r"security check|checking your browser|unusual traffic|"
+    r"lalu lintas tidak biasa|press (and hold|dan tahan))", re.I)
+
+
+def challenge_visible(page) -> str | None:
+    """What challenge is on screen right now, if any."""
+    for sel in CHALLENGE_FRAMES:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible():
+                return sel.split("'")[1]
+        except Exception:
+            continue
+    try:
+        body = page.inner_text("body", timeout=2000) or ""
+    except Exception:
+        return None
+    m = CHALLENGE_WORDS.search(body)
+    return " ".join(m.group(0).split()) if m else None
+
+
+def wait_for_human(page, what: str, on_pause=None, timeout: float = 600,
+                   poll: float = 2) -> bool:
+    """
+    Stop and let the person at the keyboard clear the challenge.
+
+    This is the whole of our CAPTCHA handling: it does not read, solve or
+    bypass anything. It notices it is blocked, says so, and waits for a human
+    to do the human part — then carries on from where it stopped.
+    """
+    log(f"  PAUSED — challenge on screen ({what}). Solve it in the browser.")
+    if on_pause:
+        on_pause(what)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        page.wait_for_timeout(int(poll * 1000))
+        if challenge_visible(page) is None:
+            log(f"  challenge cleared after "
+                f"{timeout - (deadline - time.time()):.0f}s — continuing")
+            return True
+    log(f"  challenge still up after {timeout:.0f}s")
+    return False
+
+
 class HandoverReached(Exception):
     """Not an error. The point where the human takes over."""
 
