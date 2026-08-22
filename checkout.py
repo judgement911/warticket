@@ -67,9 +67,9 @@ CARD_FIELDS = re.compile(
 # Only these profile keys are ever typed. A card number sitting in profile.json
 # by mistake is not going to be helpfully filled in for you.
 ALLOWED_PROFILE_KEYS = {
-    "full_name", "first_name", "last_name", "email", "phone",
-    "id_number", "id_type", "birth_date", "address", "city", "postcode",
-    "country", "notes",
+    "title", "full_name", "first_name", "last_name", "email", "phone",
+    "mobile", "id_number", "id_type", "birth_date", "address", "city",
+    "postcode", "country", "notes",
 }
 
 # ------------------------------------------------------------------ the queue

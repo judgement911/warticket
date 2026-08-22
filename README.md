@@ -301,3 +301,47 @@ The countdown pings (1 hour, 15 min, 5 min, 60s, 10s) exist for exactly this:
 they are the difference between being on the page early and arriving to a
 queue. Targets that share a drop time send one ping per mark, not one per
 target, so the pings stay worth reading.
+
+## Multi-platform engine (`warbot.py`)
+
+One process holding both the Telegram commands and the browser, because they
+share state — split across two hosts, `/setplatform` sets a value the browser
+never sees. Run it where the browser is.
+
+    python3 warbot.py
+
+    /workflow                 the whole procedure, start to finish
+    /setplatform tiketcom     tiketcom | loket
+    /setdata  Mr | Ade S | 08123456789 | a@b.com | Indonesia
+    /settarget <url> | CAT 1 | 2
+    /standby 14:00:00         idle, then burst 1.5s before the gate
+    /go                       run now
+    /abort  ·  /status
+
+### Adding a platform
+
+`platforms/base.py` fixes the lifecycle — gate, inventory, identity, payment —
+and each site supplies only what differs. In practice that is `lock_seat` and
+sometimes `is_admitted`; everything else is inherited. Register the class in
+`platforms/__init__.py` and `/setplatform` reaches it.
+
+`is_admitted` is worth overriding. The generic test is "queue text gone and
+the page has something to act on", but a seat-first site lands you on the
+category list, so `TiketComHandler` asks whether tier rows are visible
+instead. Waiting for buyer fields there waits forever.
+
+### What it will not do
+
+**No fingerprint spoofing and no CAPTCHA solving.** Those exist to defeat a
+site's own bot detection, which is a different thing from automating your own
+clicks. The practical consequence is real: Tiket.com may detect this browser
+and challenge it. When that happens the run stops, tells you which stage, and
+leaves the window open — solve the challenge yourself and it carries on. A
+tool that quietly fails at 14:00:00 would be worse than one that says so.
+
+**No card, ever.** `choose_payment` picks Virtual Account or QRIS and skips
+card options outright: that path ends at a 3-D Secure OTP, which is both a
+wall this cannot pass and a place automation has no business being. Card-shaped
+strings are filtered out of the reported reference by a Luhn check, so a PAN
+on the page is never relayed to Telegram. Selecting a VA does create an unpaid
+order — you still pay it yourself, in your own bank app.
