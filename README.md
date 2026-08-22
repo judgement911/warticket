@@ -102,27 +102,15 @@ Being fast at the buy button is preparation, not software:
 
 ## Targets currently configured
 
-**NCT 127 5TH TOUR 'NEO CITY : JAKARTA — THE REDLINE'** · Indonesia Arena ·
-3 Oct 2026 · Rp1,350,000–3,950,000 (+10% tax, +5% platform fee) · max 4 tickets
-per transaction, one account.
-
-| sale | when (WIB) | status |
-| --- | --- | --- |
-| NCTzen 127 membership presale | Tue 19 Aug, 14:00–21:59 | gone |
-| Dyandra Global presale | Wed 20 Aug, 14:00–21:59 | gone |
-| **General sale** | **Fri 21 Aug, 14:00 → sold out** | **this is the one** |
-
 | target | state | note |
 | --- | --- | --- |
-| NCT 127 REDLINE — event page | on | `dyandraglobalstore-03.com`, the tour page |
-| NCT 127 REDLINE — canonical store | on | `dyandraglobalstore.com`, hedge — see below |
-| Dyandra Store `-02` | off | previous sale's mirror, most likely |
-| Maroon 5 sale site | on | unchanged |
-| Maroon 5 tiket.com / S.I.N. | off | unchanged |
+| Maroon 5 sale site | on | `maroon5jakarta2027.com`, drop 29 Aug 2026 10:00 WIB |
+| Maroon 5 tiket.com | off | enable if the sale runs through tiket.com |
+| Maroon 5 S.I.N. presale | off | fan-club signup watch |
 
-Sold on Dyandra's own store, **not loket.com**. Both NCT targets carry
-`drop_time: 2026-08-21T14:00:00`, so the 2s cadence and the countdown pings
-switch on an hour before the drop by themselves.
+The NCT 127 and Dyandra store targets were removed after that sale; the
+queue-first and multi-platform work they prompted stays, and is what
+`warbot.py` runs on.
 
 ### Why two NCT targets
 
