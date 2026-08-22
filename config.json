@@ -136,13 +136,17 @@
     }
   ],
   "checkout": {
-    "_note": "Steps for checkout.py. The default map below is deliberately SELECTOR-FREE: it waits for a form, types your details, screenshots, and stops. That works on drop day with no advance knowledge of the store's DOM, because fill_profile matches fields by name/id/placeholder/autocomplete rather than by a selector you had to guess. You click the tier and quantity yourself — two taps — and let this do the typing, which is the slow part. To automate the tier clicks too, run `python3 checkout.py inspect <url>` against the LIVE sale page and add click steps from what it prints. Actions: click, select, fill, fill_profile, wait_for, goto, screenshot, sleep. Mark early steps \"optional\": true — the monitor hands over whatever URL it detected, which is often already several steps in. The driver halts before anything that looks like paying, whatever these steps say.",
+    "_note": "Steps for checkout.py, in QUEUE-FIRST order: get into the waiting room before anything else, hold the slot, and only then type. Nothing is asked of you at run time — profile.json is already on disk, so entry is never waiting on data entry. The map is selector-free on purpose so it works with no advance knowledge of the store's DOM: enter_queue finds the buy control by its wording, and fill_profile matches fields by name/id/placeholder/autocomplete. To pin the exact selectors, run `python3 checkout.py inspect <url>` against the LIVE sale page. Actions: enter_queue, wait_for_queue, click, select, fill, fill_profile, wait_for, goto, screenshot, sleep. Mark early steps \"optional\": true — the monitor hands over whatever URL it detected, which may already be past them. fill_profile refuses to run while a waiting room is on screen, and the driver halts before anything that looks like paying, whatever these steps say.",
     "_example": [
       {
-        "do": "click",
+        "do": "enter_queue",
         "selector": "#buy-button",
-        "note": "BELI TIKET — optional: the detected link may already be past this",
-        "optional": true
+        "note": "pinned selector from `inspect`, faster than text matching"
+      },
+      {
+        "do": "wait_for_queue",
+        "admitted_text": "Pilih Kategori",
+        "note": "explicit admission marker beats the field-count heuristic"
       },
       {
         "do": "click",
@@ -156,27 +160,38 @@
         "value": "2"
       },
       {
-        "do": "fill_profile",
-        "note": "buyer details from profile.json"
+        "do": "fill_profile"
       },
       {
         "do": "click",
         "text": "LANJUTKAN",
-        "note": "to payment — halts here"
+        "note": "halts at payment"
       }
     ],
     "step_timeout": 15,
     "steps": [
       {
+        "do": "enter_queue",
+        "note": "FIRST ACTION: click into the waiting room. Retries for 90s because the button is often disabled for the first second or two of a sale.",
+        "window": 90,
+        "retry_every": 0.35
+      },
+      {
+        "do": "wait_for_queue",
+        "note": "Hold the slot until admitted. Never reloads — a refresh is how you give the place back. 45 min of patience.",
+        "timeout": 2700,
+        "poll_every": 2
+      },
+      {
         "do": "wait_for",
         "selector": "input, textarea, select",
-        "note": "a form of some kind is on screen",
+        "note": "buyer form on screen",
         "optional": true,
-        "timeout": 30
+        "timeout": 60
       },
       {
         "do": "fill_profile",
-        "note": "name, email, phone, KTP — never card fields"
+        "note": "name, email, phone, KTP — only ever after admission"
       },
       {
         "do": "screenshot",

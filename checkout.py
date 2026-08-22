@@ -72,6 +72,128 @@ ALLOWED_PROFILE_KEYS = {
     "country", "notes",
 }
 
+# ------------------------------------------------------------------ the queue
+#
+# Indonesian sales put a waiting room in front of the form, and the slot is won
+# by whoever asks for it first — not by whoever has their details ready. So the
+# entry click is the first thing that happens, before any typing, and the form
+# is filled only once a slot is actually held.
+
+# "You are still in line." Both languages, because the room is often localised
+# by IP rather than by choice.
+QUEUE_WORDS = re.compile(
+    r"(waiting\s*room|you\s*are\s*in\s*(the\s*)?line|place\s*in\s*(the\s*)?"
+    r"(queue|line)|queue\s*position|estimated\s*wait|queue[-\s]?it|"
+    r"do\s*not\s*(refresh|close)|don'?t\s*(refresh|close)|"
+    r"ruang\s*tunggu|antrian|posisi\s*(anda|antrian)|mohon\s*tunggu|"
+    r"sedang\s*(memproses|diproses)|jangan\s*(me)?refresh|"
+    r"harap\s*tunggu|menunggu\s*giliran)", re.I)
+
+# What the "get me into the queue" control tends to say. Deliberately excludes
+# anything PAYMENT_WORDS would catch — guard_click still has the last word.
+BUY_WORDS = re.compile(
+    r"(beli\s*tiket|beli|buy\s*ticket|buy\s*now|buy\b|get\s*tickets?|"
+    r"book\s*now|pesan\s*tiket|pesan\s*sekarang|masuk\s*antrian|"
+    r"join\s*(the\s*)?queue|enter\s*(the\s*)?queue|antri|ikut\s*antrian|"
+    r"tiket\s*sekarang)", re.I)
+
+# Field names that mean "this is the buyer form", i.e. we are through.
+BUYER_HINTS = re.compile(
+    r"(name|nama|e-?mail|phone|telp|telepon|hp\b|mobile|ktp|nik\b|"
+    r"identit(y|as)|passport|paspor|birth|lahir|address|alamat)", re.I)
+
+# ...except these, which wear buyer-shaped names on pages that are not the
+# buyer form. A waiting room's "email me when it is my turn" box matches
+# BUYER_HINTS on the word email alone, and mistaking it for the checkout is
+# how the queue gets abandoned one step from the front.
+NON_BUYER_FIELDS = re.compile(
+    r"(notify|notifikasi|subscribe|langganan|newsletter|remind|"
+    r"search|cari|query|promo|voucher|kupon|coupon|referral|kode\s*ref)", re.I)
+
+CLICKABLES = "a, button, [role='button'], input[type='submit'], input[type='button']"
+
+
+class StillQueued(Exception):
+    """Asked to type buyer details while the waiting room is still up."""
+
+
+def queue_visible(page) -> str | None:
+    """The queue text currently on screen, if any."""
+    try:
+        body = page.inner_text("body", timeout=3000)
+    except Exception:
+        return None
+    m = QUEUE_WORDS.search(body or "")
+    if not m:
+        return None
+    # a little context around the hit, so logs show "posisi antrian: 1.234"
+    start = max(0, m.start() - 30)
+    return " ".join((body[start:m.end() + 60]).split())
+
+
+def buyer_fields(page) -> int:
+    """How many visible buyer-form inputs are on screen (card fields ignored)."""
+    n = 0
+    try:
+        loc = page.locator("input:visible, textarea:visible, select:visible")
+        for i in range(min(loc.count(), 40)):
+            el = loc.nth(i)
+            blob = " ".join((el.get_attribute(a) or "") for a in
+                            ("name", "id", "autocomplete", "placeholder", "type"))
+            if CARD_FIELDS.search(blob) or NON_BUYER_FIELDS.search(blob):
+                continue
+            if BUYER_HINTS.search(blob):
+                n += 1
+    except Exception:
+        pass
+    return n
+
+
+def admitted(page, step: dict | None = None) -> bool:
+    """
+    Are we through the queue and looking at the real form?
+
+    An explicit marker wins if the step map supplies one. Otherwise: two or
+    more buyer fields is unambiguous, while a single one only counts once the
+    queue text is gone — a waiting room with one "notify me" email box is
+    exactly the page this must not mistake for the checkout.
+    """
+    step = step or {}
+    sel, txt = step.get("admitted_selector"), step.get("admitted_text")
+    if sel or txt:
+        try:
+            loc = (page.locator(sel) if sel
+                   else page.get_by_text(txt, exact=False)).first
+            return loc.count() > 0 and loc.is_visible()
+        except Exception:
+            return False
+    fields = buyer_fields(page)
+    if fields >= 2:
+        return True
+    return fields >= 1 and queue_visible(page) is None
+
+
+def find_buy_control(page):
+    """First visible clickable that offers to get us into the sale."""
+    try:
+        loc = page.locator(CLICKABLES)
+        for i in range(min(loc.count(), 120)):
+            el = loc.nth(i)
+            try:
+                if not el.is_visible():
+                    continue
+                blob = " ".join(filter(None, (
+                    el.inner_text(timeout=1000) or "",
+                    el.get_attribute("value") or "",
+                    el.get_attribute("aria-label") or "")))
+            except Exception:
+                continue
+            if BUY_WORDS.search(blob):
+                return el
+    except Exception:
+        pass
+    return None
+
 
 def wib() -> str:
     return datetime.now(WIB).strftime("%H:%M:%S")
@@ -265,7 +387,68 @@ def run_step(page, step: dict, profile: dict, default_timeout: float) -> None:
     # what the step aimed at, minus the human-written note
     target_hint = " ".join(str(step.get(k, "")) for k in ("text", "selector"))
 
-    if action == "click":
+    if action == "enter_queue":
+        # The whole point: fire this the instant the page is up. No form, no
+        # profile read, no waiting on a selector that may appear a beat late.
+        # At t=0 the button is often absent or disabled for a second or two, so
+        # this retries in a tight loop rather than failing the step.
+        window = float(step.get("window", 90))
+        every = float(step.get("retry_every", 0.35))
+        deadline = time.time() + window
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                if step.get("selector") or step.get("text"):
+                    el = find(page, step, 1.0)
+                else:
+                    el = find_buy_control(page)
+                if el is not None:
+                    guard_click(el, target_hint)
+                    el.click(timeout=3000)
+                    took = window - (deadline - time.time())
+                    log(f"  IN — entry clicked after {took:.1f}s "
+                        f"({attempts} attempt(s))")
+                    return
+            except PaymentReached:
+                raise
+            except Exception:
+                pass
+            if time.time() >= deadline:
+                raise PWTimeout(
+                    f"no queue entry control found in {window:g}s "
+                    f"({attempts} attempts) — run `inspect` and give this step "
+                    f"an explicit selector")
+            page.wait_for_timeout(int(every * 1000))
+
+    elif action == "wait_for_queue":
+        # Queues run long, so the default patience is half an hour, not 15s.
+        timeout = float(step.get("timeout", 1800))
+        every = float(step.get("poll_every", 2))
+        deadline = time.time() + timeout
+        waited_from = time.time()
+        last = ""
+        while True:
+            if admitted(page, step):
+                mins = (time.time() - waited_from) / 60
+                log(f"  THROUGH the queue after {mins:.1f} min — "
+                    f"{buyer_fields(page)} buyer field(s) on screen")
+                notify(f"✅ <b>THROUGH THE QUEUE</b> after {mins:.1f} min\n\n"
+                       f"filling the form now — get ready to check and pay")
+                return
+            status = queue_visible(page)
+            if status and status != last:
+                last = status
+                log(f"  queue: {status[:120]}")
+            if time.time() >= deadline:
+                raise PWTimeout(
+                    f"still queued after {timeout/60:.0f} min "
+                    f"(last saw {last[:80]!r})")
+            # Deliberately no reload: a waiting room hands out a place on first
+            # contact and a manual refresh is how you hand it back.
+            page.wait_for_timeout(int(every * 1000))
+
+    elif action == "click":
         el = find(page, step, timeout)
         guard_click(el, target_hint)
         el.click(timeout=timeout * 1000)
@@ -284,6 +467,14 @@ def run_step(page, step: dict, profile: dict, default_timeout: float) -> None:
         log(f"  filled {label}")
 
     elif action == "fill_profile":
+        # Typing into a waiting room accomplishes nothing at best, and at worst
+        # fills its "notify me" box with your details and drops the real form.
+        if not step.get("allow_in_queue"):
+            waiting = queue_visible(page)
+            if waiting and not admitted(page, step):
+                raise StillQueued(
+                    f"waiting room still up ({waiting[:70]!r}) — not typing "
+                    f"into it. Put a wait_for_queue step before this one.")
         n = do_fill_profile(page, profile)
         log(f"  filled {n} profile field(s)")
 
@@ -439,6 +630,9 @@ def cmd_run(url: str) -> int:
                     run_step(page, step, profile, step_timeout)
                 except PaymentReached as e:
                     halted = f"step {i} blocked: {e}"
+                    break
+                except StillQueued as e:
+                    halted = f"step {i}: {e}"
                     break
                 except PWTimeout:
                     if step.get("optional"):

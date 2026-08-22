@@ -255,6 +255,32 @@ check the process is alive at all, then check `heartbeat_hours` against how
 long it has actually been quiet.
 
 
+## Queue-first order
+
+Indonesian sales put a waiting room in front of the form, and the slot goes to
+whoever asks for it first — not to whoever has their details ready. So the step
+map runs in this order, and the order is the point:
+
+1. `enter_queue` — the first action on the page. Clicks the entry control and
+   nothing else. Retries for 90s at ~3/sec, because the button is commonly
+   absent or disabled for the first second or two of a sale.
+2. `wait_for_queue` — holds until admitted, up to 45 minutes, logging the
+   position as it moves. It never reloads: a waiting room hands out a place on
+   first contact and a refresh is how you hand it back.
+3. `fill_profile` — only now. It refuses to run while a waiting room is on
+   screen, so a mis-ordered map cannot type your details into a queue page.
+
+Nothing is asked of you at run time. `profile.json` is already on disk, so
+entry never waits on data entry — verified by running the whole flow with no
+profile file at all: it still enters, still gets through, and fills nothing.
+
+Admission is judged by buyer fields appearing: two or more is conclusive, one
+counts only once the queue text is gone, and fields named `notify`, `subscribe`,
+`search`, `promo` and the like never count. A waiting room's "email me when it
+is my turn" box matches on the word *email* alone, and mistaking it for the
+checkout abandons the queue one step from the front. Give the step an
+`admitted_text` or `admitted_selector` from `inspect` to skip the heuristic.
+
 ## Buying from a phone
 
 No `checkout.py`, so speed comes from preparation instead of automation. Before
